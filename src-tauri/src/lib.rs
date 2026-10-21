@@ -1814,6 +1814,24 @@ fn dbg_log(window: tauri::WebviewWindow, msg: String) {
     dlog!("[{}] {}", window.label(), msg);
 }
 
+fn hide_ask_later(app: &AppHandle, gen: u64, ms: u64) {
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(ms));
+        if CLOSE_GEN.load(std::sync::atomic::Ordering::SeqCst) == gen {
+            hide_ask(&app2);
+        }
+    });
+}
+
+/// The page started its closing animation: hide the window after `ms`
+/// (unless it's opened again / the close is cancelled meanwhile).
+#[tauri::command]
+fn ask_hide_after(app: AppHandle, ms: u64) {
+    let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    hide_ask_later(&app, gen, ms.clamp(0, 600));
+}
+
 /// The page decided to stay open after all: drop the pending safety hide.
 #[tauri::command]
 fn ask_close_cancel() {
@@ -1841,14 +1859,9 @@ fn close_ask(app: &AppHandle) {
     let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     dlog!("close_ask gen={gen}");
     let _ = app.emit_to("ask", "whiskr:ask-close", ());
-    let app2 = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1500));
-        if CLOSE_GEN.load(std::sync::atomic::Ordering::SeqCst) == gen {
-            dlog!("close_ask: page did not answer, safety hide");
-            hide_ask(&app2);
-        }
-    });
+    // Hide on our own clock: the page only plays the animation. If it's busy
+    // (an answer streaming in), closing still happens right on time.
+    hide_ask_later(app, gen, 230);
 }
 
 #[cfg(windows)]
@@ -2443,6 +2456,7 @@ pub fn run() {
             ask_layout,
             ask_hide,
             ask_close_cancel,
+            ask_hide_after,
             dbg_log,
             check_update,
             install_update,

@@ -8,7 +8,7 @@ const api = TAURI ? { invoke: TAURI.core.invoke, listen: TAURI.event.listen } : 
 const EMBED = new URLSearchParams(location.search).has("embed");
 if (EMBED) document.documentElement.classList.add("embed");
 const toParent = (msg) => window.parent.postMessage({ whiskr: true, ...msg }, "*");
-const POPUP_ONLY = ["ask_layout", "ask_region", "set_glass", "ask_hide", "ask_close_cancel"];
+const POPUP_ONLY = ["ask_layout", "ask_region", "set_glass", "ask_hide", "ask_close_cancel", "ask_hide_after"];
 const listen = api.listen;
 const dbg = (m) => { try { api.invoke("dbg_log", { msg: m }).catch(() => {}); } catch {} };
 const invoke = (cmd, args) => {
@@ -294,8 +294,13 @@ function applyAnim() {
   document.documentElement.style.setProperty("--expand-ms", animMs() + "ms");
 }
 let twLast = 0;
+// While the popup is closing or hidden, don't paint at all: answers keep
+// arriving (a.text grows), they're drawn when the chat shows again. Painting
+// a streaming answer during the close animation is what made closing stutter.
+const paintPaused = () => !EMBED && (closing || !shown);
 function typewriterTick(now) {
   twRaf = 0;
+  if (paintPaused()) return;
   const dt = twLast ? Math.min(100, now - twLast) : 16;
   twLast = now;
   let more = false;
@@ -323,6 +328,7 @@ function typewriterTick(now) {
   else twLast = 0;
 }
 function kickTypewriter() {
+  if (paintPaused()) return;
   if (S.ask_typewriter && !twRaf) twRaf = requestAnimationFrame(typewriterTick);
 }
 
@@ -359,7 +365,7 @@ const dirty = new Set();
 function renderSoon(a) {
   if (a) dirty.add(a);
   else dirty.add("*");
-  if (raf) return;
+  if (raf || paintPaused()) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
     const all = dirty.has("*");
@@ -1121,6 +1127,8 @@ function cancelClose() {
   void panel.offsetWidth;
   panel.classList.add("enter");
   input.focus();
+  render();
+  kickTypewriter();
 }
 let shown = false; // the popup is on screen (between "show" and "hidden")
 function hide(why = "") {
@@ -1135,11 +1143,12 @@ function hide(why = "") {
   panel.style.setProperty("--leave-ms", ms + "ms");
   panel.classList.remove("enter", "away");
   panel.classList.add("leave");
-  closeTimer = setTimeout(() => {
-    invoke("ask_hide").catch(() => {});
-    // never stay "closing" if the window did not really hide
-    setTimeout(() => (closing = false), 500);
-  }, ms);
+  if (raf) cancelAnimationFrame(raf), (raf = 0);
+  if (twRaf) cancelAnimationFrame(twRaf), (twRaf = 0);
+  // the core hides the window after `ms` — on time even if this page is busy
+  invoke("ask_hide_after", { ms }).catch(() => invoke("ask_hide").catch(() => {}));
+  // never stay "closing" if the window did not really hide
+  closeTimer = setTimeout(() => (closing = false), ms + 900);
 }
 // Shift+Space again while it is closing = changed my mind: stay open.
 // (the key can reach us twice — system hook and page — so ignore a repeat within 350 ms)
@@ -1386,6 +1395,11 @@ function enterBar() {
   closing = false;
   clearTimeout(closeTimer); // a close still pending from before must not hide the new opening
   shown = true;
+  dirty.clear();
+  requestAnimationFrame(() => {
+    render();
+    kickTypewriter();
+  });
   panel.classList.remove("away", "enter", "leave");
   void panel.offsetWidth; // restart the animation
   panel.classList.add("enter");
@@ -1550,6 +1564,7 @@ function mockApi() {
 }
 
 function demo() {
+  shown = true; // browser preview: the "window" is always on screen
   const mode = new URLSearchParams(location.hash.slice(1)).get("mode") || "ask";
   if (location.hash.includes("side=1")) setTimeout(toggleSide, 100);
   setTimeout(() => {

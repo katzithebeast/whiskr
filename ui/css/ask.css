@@ -286,3 +286,9 @@ html.embed, html.embed body { background: transparent; }
 .composer.transcribing .cat-mini { animation: vthink 1s ease-in-out infinite; }
 @keyframes vpulse { 0% { box-shadow: 0 0 0 0 rgba(255,107,94,.6); } 100% { box-shadow: 0 0 0 9px rgba(255,107,94,0); } }
 @keyframes vthink { 50% { opacity: .45; } }
+
+/* closing the big chat: a short fade + drop (shrinking a tall panel to half
+   its height looked like a stutter) */
+.shell[data-state="expanded"] .panel.leave { animation-name: chatOut; animation-timing-function: cubic-bezier(.4,0,1,1); }
+@keyframes chatOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(18px) scale(.975); } }
+.panel.leave { will-change: transform, opacity; pointer-events: none; }
