@@ -1436,13 +1436,16 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
             // Tell the window library it is visible now (we showed it with a raw
             // ShowWindow above). Without this it still thinks "hidden" — it then
             // refuses set_focus and may hide the window again on its next update.
+            // (no AttachThreadInput tricks here: they froze the whole app for
+            // seconds now and then — every Shift+Space queued up behind them)
+            let t0 = Instant::now();
             let _ = w.show();
             #[cfg(windows)]
             if let Ok(h) = w.hwnd() {
                 bare_ask_frame(h.0 as isize);
-                force_foreground(h.0 as isize);
             }
             let _ = w.set_focus();
+            dlog!("open_ask thread: show+focus took {} ms", t0.elapsed().as_millis());
             #[cfg(windows)]
             if let Ok(h) = w.hwnd() {
                 let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
@@ -1588,9 +1591,9 @@ fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
     Ok(id)
 }
 
-/// Reliably take the keyboard focus even when another app is in front
-/// (plain SetForegroundWindow is refused now and then — Ask then ignored typing).
+/// Unused: AttachThreadInput-based focus stealing froze the app for seconds.
 #[cfg(windows)]
+#[allow(dead_code)]
 fn force_foreground(hwnd: isize) {
     use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;

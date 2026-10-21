@@ -1,6 +1,6 @@
 [package]
 name = "whiskr"
-version = "0.16.1"
+version = "0.16.2"
 description = "Whiskr — speak, Whiskr does the rest."
 authors = ["Filip Kubeš"]
 edition = "2021"

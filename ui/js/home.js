@@ -2,8 +2,8 @@
 import { cat, keyLabels } from "./cat.js";
 
 export const CHANGELOG = [
-  { v: "0.16.1", d: "2026-10-21",
-    cs: ["Plynulé zavírání chatu", "Chat se zavře hned, i když zrovna přichází odpověď (ta se dopíše na pozadí). Zavírací animace velkého chatu je kratší a hladší."],
+  { v: "0.16.2", d: "2026-10-21",
+    cs: ["Plynulé zavírání chatu", "Chat se zavře hned, i když zrovna přichází odpověď (ta se dopíše na pozadí). Opravené několikasekundové zaseknutí při otevírání, kvůli kterému se zavírání zpožďovalo."],
     en: ["Smooth chat closing", "The chat closes right away even while an answer is streaming in (it keeps arriving in the background). The big chat's closing animation is shorter and smoother."] },
   { v: "0.16", d: "2026-10-21",
     cs: ["Instalačka a aktualizace jedním klikem", "Whiskr má instalačku a sám se podívá po nové verzi. Když je, na úvodní stránce se objeví Aktualizovat — stáhne, nainstaluje a znovu spustí."],
