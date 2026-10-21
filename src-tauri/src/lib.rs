@@ -544,7 +544,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let lock = MenuItem::with_id(app, "lock", "🔒 Zamknout zkratky (hraní)", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &rec, &sep, &lock, &pause, &sep2, &quit])?;
+    let update = MenuItem::with_id(app, "update", "Zkontrolovat aktualizace", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &rec, &sep, &lock, &pause, &sep2, &update, &quit])?;
     *app.state::<AppState>().pause_item.lock() = Some(pause);
     *app.state::<AppState>().lock_item.lock() = Some(lock);
     *app.state::<AppState>().rec_item.lock() = Some(rec);
@@ -557,6 +558,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
             "lock" => set_locked(app, !keys_locked()),
+            "update" => {
+                show_main(app);
+                let _ = app.emit_to("main", "whiskr:update-check", ());
+            }
             "pause" => {
                 let paused = *app.state::<AppState>().paused.lock();
                 set_paused(app, !paused);

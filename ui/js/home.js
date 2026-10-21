@@ -2,6 +2,9 @@
 import { cat, keyLabels } from "./cat.js";
 
 export const CHANGELOG = [
+  { v: "0.17.1", d: "2026-10-21",
+    cs: ["Tlačítko na aktualizace", "Zkontrolovat aktualizace teď najdeš tady u novinek, v Nastavení i v menu ikony u hodin. Jedno kliknutí: když je nová verze, rovnou se stáhne a nainstaluje. Stahování už neutne pomalé připojení."],
+    en: ["An update button", "Check for updates is now here next to What's new, in Settings and in the tray icon's menu. One click: if there's a new version, it downloads and installs right away. A slow connection no longer cuts the download off."] },
   { v: "0.17.0", d: "2026-10-21",
     cs: ["Akce, soubory, /screen a chat, který zná tvoje schůzky", "Napiš / a vyber akci (přelož, oprav, e-mail… — vlastní si nastavíš v Nastavení → Whiskr Ask, spolu s instrukcemi, jak ti má chat odpovídat). /screen přiloží snímek obrazovky ke zprávě. Soubory a obrázky přetáhni do chatu nebo vlož přes Ctrl+V. Hledání (Ctrl+F) prochází i odpovědi. Claude a GPT si umí dohledat tvoje diktáty a schůzky."],
     en: ["Actions, files, /screen and a chat that knows your meetings", "Type / and pick an action (translate, fix, e-mail… — make your own in Settings → Whiskr Ask, along with instructions for how the chat should answer). /screen attaches a screenshot to your message. Drop files and pictures into the chat or paste them with Ctrl+V. Search (Ctrl+F) looks through answers too. Claude and GPT can look up your dictations and meetings."] },

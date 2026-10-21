@@ -85,9 +85,15 @@ pub async fn check(http: &reqwest::Client) -> Result<UpdateInfo, String> {
 }
 
 /// Download the installer (progress → "whiskr:update-progress" 0..1) and return its path.
-pub async fn download(app: &AppHandle, http: &reqwest::Client, info: &UpdateInfo) -> Result<PathBuf, String> {
+pub async fn download(app: &AppHandle, _http: &reqwest::Client, info: &UpdateInfo) -> Result<PathBuf, String> {
+    // own client: the app's shared one gives up after 60 s, too short for a slow line
+    let http = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(20 * 60))
+        .build()
+        .map_err(|e| format!("Stahování: {e}"))?;
     let url = format!("https://api.github.com/repos/{REPO}/releases/assets/{}", info.asset_id);
-    let mut resp = req(http, &url)
+    let mut resp = req(&http, &url)
         .header("Accept", "application/octet-stream")
         .send()
         .await

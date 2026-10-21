@@ -943,3 +943,6 @@ textarea.games { width: 100%; min-height: 70px; resize: vertical; font-family: u
 .act-item .act-name { display: flex; align-items: center; gap: 4px; font-weight: 800; color: var(--stone-ink, inherit); }
 .act-item .act-name input { min-width: 0; }
 .act-item textarea { resize: vertical; min-height: 38px; font: inherit; }
+
+.clog-head .upd-now { margin-top: 12px; display: inline-flex; align-items: center; gap: 7px; }
+.clog-head .upd-now svg { width: 15px; height: 15px; }

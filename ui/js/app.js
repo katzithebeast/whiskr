@@ -203,25 +203,45 @@ listen("whiskr:update-progress", (ev) => {
   $("#upd-fill").style.width = Math.round((ev.payload || 0) * 100) + "%";
   if (ev.payload >= 1) $("#upd-t").textContent = T.upd_inst;
 });
-$("#upd-check")?.addEventListener("click", async (e) => {
-  const b = e.currentTarget;
-  b.disabled = true;
-  $("#upd-d").textContent = T.upd_checking;
+// One button everywhere (home, Settings, tray): look for a new version and,
+// if there is one, install it right away.
+let updBusy = false;
+async function checkAndUpdate(btn) {
+  if (updBusy) return;
+  updBusy = true;
+  const label = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = T.upd_checking;
+  }
+  if ($("#upd-d")) $("#upd-d").textContent = T.upd_checking;
   try {
     upd = await invoke("check_update");
     if (upd?.available) {
-      $("#upd-d").textContent = fmtV(T.upd_have, upd.latest);
-      b.textContent = T.upd_go;
-      b.onclick = () => installUpdate(b);
+      if ($("#upd-d")) $("#upd-d").textContent = fmtV(T.upd_have, upd.latest);
+      renderUpdate();
+      go("home");
+      $("#upd")?.scrollIntoView({ block: "start" });
+      await installUpdate($("#upd-go"));
     } else {
-      $("#upd-d").textContent = fmtV(T.upd_latest, upd?.current);
+      const msg = fmtV(T.upd_latest, upd?.current);
+      if ($("#upd-d")) $("#upd-d").textContent = msg;
+      toast(msg);
+      renderUpdate();
     }
-    renderUpdate();
   } catch (err) {
-    $("#upd-d").textContent = String(err);
+    if ($("#upd-d")) $("#upd-d").textContent = String(err);
+    toast(String(err));
   }
-  b.disabled = false;
-});
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = label;
+  }
+  updBusy = false;
+}
+$("#upd-check")?.addEventListener("click", (e) => checkAndUpdate(e.currentTarget));
+$("#upd-now")?.addEventListener("click", (e) => checkAndUpdate(e.currentTarget));
+listen("whiskr:update-check", () => checkAndUpdate($("#upd-now")));
 
 let lock = { locked: false, game: false };
 function renderStatus() {
