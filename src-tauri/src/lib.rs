@@ -1384,6 +1384,44 @@ fn ask_visible(app: &AppHandle) -> bool {
     app.get_webview_window("ask").and_then(|w| w.is_visible().ok()).unwrap_or(false)
 }
 
+/// Show the chat window and give it the keyboard — straight through Windows,
+/// from whatever thread we're on. (The window library's show()/set_focus()
+/// run on the UI thread and, with the big chat open, took 1–3 s each.)
+fn ask_show_focus(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, VK_LMENU};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_SHOW};
+        let h = ASK_HWND.load(AO::SeqCst);
+        if h == 0 {
+            return;
+        }
+        unsafe {
+            if IsWindowVisible(h as _) == 0 {
+                ShowWindow(h as _, SW_SHOW);
+            }
+            bare_ask_frame(h);
+            if GetForegroundWindow() as isize == h {
+                return;
+            }
+            if SetForegroundWindow(h as _) == 0 {
+                // Windows refused: a tap of Alt grants the right to switch (same trick the window library uses)
+                let sc = MapVirtualKeyW(VK_LMENU as u32, MAPVK_VK_TO_VSC) as u16;
+                let key = |flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_LMENU, wScan: sc, dwFlags: flags, time: 0, dwExtraInfo: 0 } } };
+                let inputs = [key(KEYEVENTF_EXTENDEDKEY), key(KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)];
+                SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
+                SetForegroundWindow(h as _);
+            }
+        }
+        let _ = app;
+    }
+    #[cfg(not(windows))]
+    if let Some(w) = app.get_webview_window("ask") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 fn start_ask_applier(app: AppHandle) {
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let _ = ASK_KICK.set(parking_lot::Mutex::new(tx));
@@ -1402,10 +1440,7 @@ fn start_ask_applier(app: AppHandle) {
                     CLOSE_GEN.fetch_add(1, AO::SeqCst);
                     ASK_CLOSING.store(false, AO::SeqCst);
                     let _ = app.emit_to("ask", "whiskr:ask-reopen", ());
-                    if let Some(w) = app.get_webview_window("ask") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
+                    ask_show_focus(&app);
                 } else if !want && vis && !closing {
                     close_ask(&app);
                 }
@@ -1436,7 +1471,7 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
         let recent = std::mem::take(&mut *app.state::<AppState>().ask_just_opened.lock()).map_or(false, |t| t.elapsed() < Duration::from_millis(1500));
         if chord && recent {
             let _ = app.emit_to("ask", "whiskr:ask-open", json!({ "phase": "show", "fresh": fresh, "switch": true }));
-            let _ = w.set_focus();
+            ask_show_focus(app);
             return;
         }
         close_ask(app);
@@ -1452,7 +1487,7 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     #[cfg(windows)]
     {
         let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
-        let ask_h = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+        let ask_h = ASK_HWND.load(AO::SeqCst);
         if fg != 0 && fg != ask_h {
             *state.ask_return.lock() = fg;
         }
@@ -1503,28 +1538,21 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
             dlog!("open_ask thread: closed meanwhile, no focus");
             return;
         }
-        if let Some(w) = app2.get_webview_window("ask") {
-            if !w.is_visible().unwrap_or(false) {
+        if let Some(_w) = app2.get_webview_window("ask") {
+            if !ask_visible(&app2) {
                 dlog!("open_ask thread: window not visible any more");
                 return;
             }
             // Tell the window library it is visible now (we showed it with a raw
             // ShowWindow above). Without this it still thinks "hidden" — it then
             // refuses set_focus and may hide the window again on its next update.
-            // (no AttachThreadInput tricks here: they froze the whole app for
-            // seconds now and then — every Shift+Space queued up behind them)
             let t0 = Instant::now();
-            let _ = w.show();
-            #[cfg(windows)]
-            if let Ok(h) = w.hwnd() {
-                bare_ask_frame(h.0 as isize);
-            }
-            let _ = w.set_focus();
+            ask_show_focus(&app2);
             dlog!("open_ask thread: show+focus took {} ms", t0.elapsed().as_millis());
             #[cfg(windows)]
-            if let Ok(h) = w.hwnd() {
+            {
                 let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
-                dlog!("open_ask thread: focused={} visible={:?}", fg == h.0 as isize, w.is_visible());
+                dlog!("open_ask thread: focused={} visible={}", fg == ASK_HWND.load(AO::SeqCst), ask_visible(&app2));
             }
         }
         let _ = app2.emit_to(
@@ -1794,9 +1822,9 @@ fn ask_open_with(app: AppHandle, text: String, send: bool) {
     let Some(w) = app.get_webview_window("ask") else { return };
     ASK_WANT.store(true, AO::SeqCst);
     ASK_CLOSING.store(false, AO::SeqCst);
+    let _ = &w;
     place_ask(&app, true);
-    let _ = w.show();
-    let _ = w.set_focus();
+    ask_show_focus(&app);
     let _ = app.emit_to("ask", "whiskr:ask-prefill", json!({ "text": text, "send": send }));
 }
 
@@ -1892,7 +1920,7 @@ fn open_image(app: AppHandle, path: String) -> Result<(), String> {
 
 /// Diagnostic line from a page (goes to whiskr-debug.log).
 #[tauri::command]
-fn dbg_log(window: tauri::WebviewWindow, msg: String) {
+async fn dbg_log(window: tauri::WebviewWindow, msg: String) {
     dlog!("[{}] {}", window.label(), msg);
 }
 
@@ -1929,7 +1957,7 @@ fn watch_main_thread(app: AppHandle) {
 
 /// Shift+Space reached the chat page itself (it had the keyboard) — act like the shortcut.
 #[tauri::command]
-fn ask_toggle(app: AppHandle) {
+async fn ask_toggle(app: AppHandle) {
     dlog!("ask_toggle from page");
     toggle_ask(&app);
 }
@@ -1937,7 +1965,7 @@ fn ask_toggle(app: AppHandle) {
 /// The page started its closing animation: hide the window after `ms`
 /// (unless it's opened again / the close is cancelled meanwhile).
 #[tauri::command]
-fn ask_hide_after(app: AppHandle, ms: u64) {
+async fn ask_hide_after(app: AppHandle, ms: u64) {
     ASK_WANT.store(false, AO::SeqCst);
     ASK_CLOSING.store(true, AO::SeqCst);
     let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -1946,20 +1974,17 @@ fn ask_hide_after(app: AppHandle, ms: u64) {
 
 /// The page decided to stay open after all: drop the pending safety hide.
 #[tauri::command]
-fn ask_close_cancel(app: AppHandle) {
+async fn ask_close_cancel(app: AppHandle) {
     dlog!("ask_close_cancel");
     ASK_WANT.store(true, AO::SeqCst);
     ASK_CLOSING.store(false, AO::SeqCst);
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    // it stays open: make sure the window library knows and it has the keyboard
-    if let Some(w) = app.get_webview_window("ask") {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
+    // it stays open: make sure it has the keyboard
+    ask_show_focus(&app);
 }
 
 #[tauri::command]
-fn ask_hide(app: AppHandle) {
+async fn ask_hide(app: AppHandle) {
     // the page closed it itself: the safety hide isn't needed any more
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     hide_ask(&app);
@@ -2001,19 +2026,22 @@ fn hide_ask(app: &AppHandle) {
         // its last frame for a moment — with an empty region that frame is never
         // seen; the page sets the real region once it's ready.
         #[cfg(windows)]
-        let had_keyboard = w.hwnd().map(|h| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == h.0 as isize).unwrap_or(false);
+        let ask_h = ASK_HWND.load(AO::SeqCst);
         #[cfg(windows)]
-        if let Ok(h) = w.hwnd() {
-            clear_region(h.0 as isize);
+        let had_keyboard = ask_h != 0 && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == ask_h;
+        #[cfg(windows)]
+        if ask_h != 0 {
+            clear_region(ask_h);
             // Hide for real at the Windows level too. The window is shown with a
             // raw ShowWindow (so it doesn't steal focus before Ctrl+C); if it is
             // closed again before the window library is told it's visible, the
             // library's own hide() is a no-op and the chat stayed open, invisible
             // — every further Shift+Space then just "closed" it again.
             unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h.0 as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(ask_h as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
             }
         }
+        #[cfg(not(windows))]
         let _ = w.hide();
         // Give the keyboard back to where it was. Otherwise it stays on the
         // hidden chat: the next Shift+Space lands in the invisible page instead
@@ -2025,7 +2053,7 @@ fn hide_ask(app: &AppHandle) {
             let ok = back != 0 && unsafe { IsWindow(back as _) != 0 && IsWindowVisible(back as _) != 0 && SetForegroundWindow(back as _) != 0 };
             dlog!("hide_ask: keyboard back to previous window: {ok}");
         }
-        dlog!("hide_ask: visible after = {:?}", w.is_visible());
+        dlog!("hide_ask: visible after = {}", ask_visible(app));
         let _ = app.emit_to("ask", "whiskr:ask-hidden", ());
     }
 }
@@ -2104,13 +2132,20 @@ async fn ask_region(app: AppHandle, x: f64, y: f64, w: f64, h: f64, r: f64) {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
-        let Some(win) = app.get_webview_window("ask") else { return };
-        let (Ok(hwnd), Ok(sf)) = (win.hwnd(), win.scale_factor()) else { return };
+        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+        let _ = &app;
+        // straight from Windows (asking the window library waits for the UI thread)
+        let hwnd = ASK_HWND.load(AO::SeqCst);
+        if hwnd == 0 {
+            return;
+        }
+        let dpi = unsafe { GetDpiForWindow(hwnd as _) };
+        let sf = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
         let px = |v: f64| (v * sf).round() as i32;
         unsafe {
             let rgn = CreateRoundRectRgn(px(x), px(y), px(x + w) + 1, px(y + h) + 1, px(r * 2.0), px(r * 2.0));
             // the system owns the region afterwards
-            SetWindowRgn(hwnd.0 as _, rgn, 1);
+            SetWindowRgn(hwnd as _, rgn, 1);
         }
     }
     #[cfg(not(windows))]
