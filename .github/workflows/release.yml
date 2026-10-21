@@ -1,6 +1,6 @@
 # Builds the Windows installer and publishes it as a GitHub Release.
-# Run it by pushing a tag:  git tag v0.15.3 && git push origin v0.15.3
-# (or by hand: Actions → Release → Run workflow).
+# Runs when a commit on main carries a NEW version in src-tauri/Cargo.toml
+# (a release v<version> doesn't exist yet) — or by hand: Actions → Release → Run workflow.
 #
 # The repo is public, so the in-app updater reads releases without any token.
 # (If it ever goes private: add a read-only token as the WHISKR_UPDATE_TOKEN
@@ -9,7 +9,8 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+    paths: ["src-tauri/Cargo.toml", ".github/workflows/release.yml"]
   workflow_dispatch:
 
 permissions:
@@ -21,25 +22,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Version from Cargo.toml
+        id: ver
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release v$v already exists — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.ver.outputs.skip != 'true'
         with:
           node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.ver.outputs.skip != 'true'
 
       - uses: swatinem/rust-cache@v2
+        if: steps.ver.outputs.skip != 'true'
         with:
           workspaces: src-tauri
 
       - run: npm ci
-
-      - name: Version from Cargo.toml
-        id: ver
-        shell: bash
-        run: echo "v=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+        if: steps.ver.outputs.skip != 'true'
 
       - name: Build
+        if: steps.ver.outputs.skip != 'true'
         shell: bash
         env:
           WHISKR_UPDATE_TOKEN: ${{ secrets.WHISKR_UPDATE_TOKEN }}
@@ -50,9 +64,11 @@ jobs:
           ls -la src-tauri/target/release/bundle/nsis
 
       - name: Publish release
+        if: steps.ver.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.v }}
+          target_commitish: ${{ github.sha }}
           name: Whiskr ${{ steps.ver.outputs.v }}
           generate_release_notes: true
           files: src-tauri/target/release/bundle/nsis/*-setup.exe

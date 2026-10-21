@@ -53,10 +53,10 @@ npx tauri dev          # vývoj
 npx tauri build        # instalačka v src-tauri/target/release/bundle/nsis/
 ```
 
-**Vydání nové verze:** zvyš `version` v `src-tauri/Cargo.toml` i `src-tauri/tauri.conf.json`, pak:
+**Vydání nové verze:** zvyš `version` v `src-tauri/Cargo.toml` i `src-tauri/tauri.conf.json` a pushni na `main`:
 
 ```bash
-git commit -am "Whiskr 0.16.1" && git tag v0.16.1 && git push && git push --tags
+git commit -am "Whiskr 0.16.1" && git push
 ```
 
-GitHub Actions sestaví instalačku a vydá ji jako Release. Aplikace u všech si ji samy najdou.
+GitHub Actions pozná novou verzi, sestaví instalačku a vydá ji jako Release `v0.16.1`. Aplikace u všech si ji samy najdou.
