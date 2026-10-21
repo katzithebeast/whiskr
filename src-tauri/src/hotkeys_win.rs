@@ -273,11 +273,6 @@ pub fn send_backspace() {
     }
 }
 
-/// Is a key physically down right now?
-pub fn key_down(vk: u16) -> bool {
-    down(vk)
-}
-
 fn tap_mask_key() {
     let key = |flags| INPUT {
         r#type: INPUT_KEYBOARD,

@@ -1,6 +1,7 @@
-# Builds the Windows installer and publishes it as a GitHub Release.
-# Runs when a commit on main carries a NEW version in src-tauri/Cargo.toml
-# (a release v<version> doesn't exist yet) — or by hand: Actions → Release → Run workflow.
+# Builds Whiskr on Windows (standard MSVC toolchain) and publishes it.
+#   main → release  v<version>      (the in-app updater offers it to everyone)
+#   dev  → pre-release dev-v<version> (test builds; the updater ignores them)
+# Runs when a commit carries a NEW version in src-tauri/Cargo.toml — or by hand.
 #
 # The repo is public, so the in-app updater reads releases without any token.
 # (If it ever goes private: add a read-only token as the WHISKR_UPDATE_TOKEN
@@ -9,12 +10,17 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths: ["src-tauri/Cargo.toml", ".github/workflows/release.yml"]
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# one build per branch at a time (pushing twice quickly used to start two)
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   windows:
@@ -29,9 +35,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ "${{ github.ref_name }}" = "main" ]; then tag="v$v"; pre=false; else tag="dev-v$v"; pre=true; fi
           echo "v=$v" >> "$GITHUB_OUTPUT"
-          if gh release view "v$v" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            echo "Release v$v already exists — nothing to do."
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "pre=$pre" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $tag already exists — nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -61,14 +70,23 @@ jobs:
         run: |
           cargo build --release --manifest-path src-tauri/Cargo.toml --bin whiskr-mcp
           npx tauri build --bundles nsis --config '{"bundle":{"resources":{"target/release/whiskr-mcp.exe":"whiskr-mcp.exe"}}}'
-          ls -la src-tauri/target/release/bundle/nsis
+          mkdir -p out
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe out/
+          cp src-tauri/target/release/whiskr.exe out/Whiskr.exe
+          cp src-tauri/target/release/whiskr-mcp.exe out/whiskr-mcp.exe
+          ls -la out
 
       - name: Publish release
         if: steps.ver.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.ver.outputs.v }}
+          tag_name: ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Whiskr ${{ steps.ver.outputs.v }}
+          name: ${{ steps.ver.outputs.pre == 'true' && format('Whiskr {0} (test)', steps.ver.outputs.v) || format('Whiskr {0}', steps.ver.outputs.v) }}
+          prerelease: ${{ steps.ver.outputs.pre == 'true' }}
+          make_latest: ${{ steps.ver.outputs.pre != 'true' }}
           generate_release_notes: true
-          files: src-tauri/target/release/bundle/nsis/*-setup.exe
+          files: |
+            out/*-setup.exe
+            out/Whiskr.exe
+            out/whiskr-mcp.exe

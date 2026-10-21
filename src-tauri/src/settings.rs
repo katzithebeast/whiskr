@@ -103,6 +103,10 @@ pub struct Settings {
     pub ask_voice_send: bool,
     /// Games: while one of these apps is in front, Whiskr's shortcuts are off.
     pub game_apps: Vec<String>,
+    /// Ask: if UI Automation can't read the selection, copy it with Ctrl+C (off by default).
+    pub ask_selection_copy: bool,
+    /// Write a diagnostic log next to Whiskr.exe (for troubleshooting only).
+    pub debug_log: bool,
     /// Intro animation when the main window opens.
     pub splash: bool,
     /// Picture behind the home page hero: "" = built-in mountains, "none", or a file path.
@@ -169,6 +173,8 @@ impl Default for Settings {
             ask_space_new: false,
             ask_voice_send: true,
             game_apps: vec!["league of legends.exe".into()],
+            ask_selection_copy: false,
+            debug_log: false,
             look: Look::default(),
             splash: true,
             home_bg: String::new(),

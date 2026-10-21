@@ -505,6 +505,7 @@ function renderSettings() {
   $$("#set-bar .seg").forEach((s) => s.classList.toggle("on", s.dataset.v === (settings.bar_style || "classic")));
   $("#set-sounds").checked = settings.sounds;
   $("#set-splash").checked = settings.splash !== false;
+  if ($("#set-debug")) $("#set-debug").checked = !!settings.debug_log;
   $("#set-tone").checked = settings.app_tone !== false;
   $("#set-autostart").checked = settings.autostart;
   $("#set-ui").value = settings.ui_lang;
@@ -520,6 +521,7 @@ async function renderMics() {
 }
 
 $("#set-splash").addEventListener("change", (e) => save({ splash: e.target.checked }));
+$("#set-debug")?.addEventListener("change", (e) => save({ debug_log: e.target.checked }));
 $("#set-language").addEventListener("change", (e) => save({ language: e.target.value }));
 $("#set-mic").addEventListener("change", (e) => save({ microphone: e.target.value || null }));
 $("#set-sounds").addEventListener("change", (e) => save({ sounds: e.target.checked }));

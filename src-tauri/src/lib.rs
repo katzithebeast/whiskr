@@ -1,6 +1,7 @@
 #[macro_use]
 mod dlog;
 mod groq;
+mod selection;
 mod updater;
 mod history;
 mod meeting;
@@ -417,9 +418,13 @@ async fn process_command(app: &AppHandle, clip: recorder::Clip, cat: &str) -> Re
         return Ok(None);
     }
     // Grab the selection first, while it's still selected in the target app.
-    let (selection, original) = tauri::async_runtime::spawn_blocking(paste::read_selection)
-        .await
-        .map_err(|e| e.to_string())??;
+    let uia = tauri::async_runtime::spawn_blocking(selection::focused_selection).await.ok().flatten();
+    let (selection, original) = match uia {
+        Some(t) => (Some(t), arboard::Clipboard::new().ok().and_then(|mut c| c.get_text().ok())),
+        None => tauri::async_runtime::spawn_blocking(paste::read_selection)
+            .await
+            .map_err(|e| e.to_string())??,
+    };
     let restore = original.clone();
     let result: Result<Option<String>, String> = async {
         let (key, language, dictionary) = {
@@ -777,6 +782,7 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings)
         r.map_err(|e| format!("Automatické spuštění: {e}"))?;
     }
     settings.save(&state.settings_path)?;
+    dlog::set_enabled(settings.debug_log);
     #[cfg(windows)]
     hotkeys_win::set_games(settings.game_apps.clone());
     *state.settings.lock() = settings.clone();
@@ -1437,7 +1443,6 @@ fn ask_visible(app: &AppHandle) -> bool {
 fn ask_show_focus(app: &AppHandle) {
     #[cfg(windows)]
     {
-        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, VK_LMENU};
         use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_SHOW};
         let h = ASK_HWND.load(AO::SeqCst);
         if h == 0 {
@@ -1451,14 +1456,10 @@ fn ask_show_focus(app: &AppHandle) {
                 return;
             }
             let t0 = Instant::now();
-            if SetForegroundWindow(h as _) == 0 {
-                // Windows refused: a tap of Alt grants the right to switch (same trick the window library uses)
-                let sc = MapVirtualKeyW(VK_LMENU as u32, MAPVK_VK_TO_VSC) as u16;
-                let key = |flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_LMENU, wScan: sc, dwFlags: flags, time: 0, dwExtraInfo: 0 } } };
-                let inputs = [key(KEYEVENTF_EXTENDEDKEY), key(KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)];
-                SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
-                SetForegroundWindow(h as _);
-            }
+            // (no faked Alt key press to force it — that's what malware does;
+            // Whiskr just received the shortcut, so Windows normally allows this)
+            let ok = SetForegroundWindow(h as _) != 0;
+            dlog!("ask_show_focus: SetForegroundWindow ok={ok}");
             dlog!("ask_show_focus: SetForegroundWindow took {} ms", t0.elapsed().as_millis());
         }
         let _ = app;
@@ -1573,10 +1574,16 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
         // Wait for the user to let go of Shift (max ~0.7 s). We never fake a
         // Shift release any more — that confused Windows about the real Shift
         // and made the next Shift+Space type a plain space instead.
-        if want_sel && wait_modifiers_up(700) {
-            if let Ok((sel, original)) = paste::read_selection_wait(4) {
-                paste::set_clipboard(original);
-                selection = sel.filter(|t| t.trim().chars().count() > 1);
+        if want_sel {
+            // read it through UI Automation (no keys sent, clipboard untouched)
+            selection = selection::focused_selection().filter(|t| t.chars().count() > 1);
+            // optional, off by default: the old way (Ctrl+C into the app)
+            let copy_ok = app2.state::<AppState>().settings.lock().ask_selection_copy;
+            if selection.is_none() && copy_ok && wait_modifiers_up(700) {
+                if let Ok((sel, original)) = paste::read_selection_wait(4) {
+                    paste::set_clipboard(original);
+                    selection = sel.filter(|t| t.trim().chars().count() > 1);
+                }
             }
         }
         dlog!("open_ask thread: want_sel={want_sel} selection={}", selection.is_some());
@@ -1743,26 +1750,6 @@ async fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
     Ok(id)
 }
 
-/// Unused: AttachThreadInput-based focus stealing froze the app for seconds.
-#[cfg(windows)]
-#[allow(dead_code)]
-fn force_foreground(hwnd: isize) {
-    use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow};
-    unsafe {
-        let fg = GetForegroundWindow();
-        let me = GetCurrentThreadId();
-        let fg_thread = if fg.is_null() { 0 } else { GetWindowThreadProcessId(fg, std::ptr::null_mut()) };
-        let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, 1) != 0;
-        BringWindowToTop(hwnd as _);
-        SetForegroundWindow(hwnd as _);
-        SetFocus(hwnd as _);
-        if attached {
-            AttachThreadInput(me, fg_thread, 0);
-        }
-    }
-}
 
 /// Windows fades windows in/out on show/hide; that made Ask feel slow and choppy.
 #[cfg(windows)]
@@ -2411,24 +2398,41 @@ fn takeover(app: &AppHandle, args: &[String]) -> bool {
         bar_state(app, "notify", Some("Nahrávání běží — novou verzi spusť po jeho skončení"));
         return false;
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let path = canon(&other).to_string_lossy().trim_start_matches(r"\\?\").to_string();
-        let ok = std::process::Command::new("cmd")
-            .raw_arg(format!("/C ping -n 3 127.0.0.1 >NUL & start \"\" \"{path}\""))
-            .creation_flags(0x0800_0000)
-            .spawn()
-            .is_ok();
-        if ok {
-            app.exit(0);
-            return true;
-        }
+    // Start the other Whiskr directly and tell it to wait until we've quit
+    // (no cmd.exe / ping delay tricks — that pattern is what malware uses).
+    let path = canon(&other).to_string_lossy().trim_start_matches(r"\\?\").to_string();
+    let ok = std::process::Command::new(&path)
+        .args(["--after", &std::process::id().to_string()])
+        .spawn()
+        .is_ok();
+    if ok {
+        app.exit(0);
+        return true;
     }
     false
 }
 
+/// Started by an older Whiskr handing over (`--after <pid>`): wait until it
+/// has really quit, so the single-instance check lets us in.
+fn wait_for_previous() {
+    let args: Vec<String> = std::env::args().collect();
+    let Some(pid) = args.iter().position(|a| a == "--after").and_then(|i| args.get(i + 1)).and_then(|p| p.parse::<u32>().ok()) else { return };
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+        let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !h.is_null() {
+            WaitForSingleObject(h, 10_000);
+            CloseHandle(h);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = pid;
+}
+
 pub fn run() {
+    wait_for_previous();
     dlog::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -2608,6 +2612,7 @@ pub fn run() {
                 recover_recordings(&rescue);
             });
 
+            dlog::set_enabled(app.state::<AppState>().settings.lock().debug_log);
             watch_updates(handle.clone());
             start_ask_applier(handle.clone());
             watch_main_thread(handle.clone());

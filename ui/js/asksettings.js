@@ -46,6 +46,7 @@ export function initAskSettings(ctx) {
     $("#ask-runtime").innerHTML = ["auto", "windows", "wsl"].map((k) => `<option value="${k}">${esc(t["rt_" + k])}</option>`).join("");
     $("#ask-runtime").value = s.ask_runtime || "auto";
     $("#ask-sel").checked = s.ask_selection !== false;
+    if ($("#ask-selcopy")) $("#ask-selcopy").checked = !!s.ask_selection_copy;
     if ($("#ask-tw")) $("#ask-tw").checked = !!s.ask_typewriter;
     if ($("#ask-fast")) $("#ask-fast").checked = s.ask_fast !== false;
     if ($("#ask-swap")) $("#ask-swap").checked = !!s.ask_space_new;
@@ -140,6 +141,7 @@ export function initAskSettings(ctx) {
   $("#ask-engine").addEventListener("change", (e) => save({ ask_engine: e.target.value }));
   $("#ask-runtime").addEventListener("change", (e) => save({ ask_runtime: e.target.value }));
   $("#ask-sel").addEventListener("change", (e) => save({ ask_selection: e.target.checked }));
+  $("#ask-selcopy")?.addEventListener("change", (e) => save({ ask_selection_copy: e.target.checked }));
   $("#ask-tw")?.addEventListener("change", async (e) => {
     await save({ ask_typewriter: e.target.checked });
     renderSelects();
