@@ -400,6 +400,16 @@ fn handle_key(vk: u32, scan: u32, is_down: bool) -> Option<bool> {
         if hit.is_none() {
             s.dirty = true;
         }
+        // The chat itself is in front: let IT handle Shift+Space. It starts the
+        // close animation instantly in the page, instead of waiting for a
+        // round-trip through Whiskr's UI thread (busy for a second or two
+        // while the big chat repaints — the animation was skipped).
+        if let Some(b) = &hit {
+            if b.id == "ask" && s.ask_hwnd != 0 && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == s.ask_hwnd {
+                crate::dlog::log("hook: Shift+Space → the chat in front handles it");
+                return None;
+            }
+        }
         if let Some(b) = hit {
             s.held = Some((b.id.clone(), scan, vk));
             s.held_seen = Some(std::time::Instant::now());

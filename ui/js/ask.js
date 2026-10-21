@@ -1031,9 +1031,18 @@ window.addEventListener(
         e.stopPropagation();
         // The page got the shortcut itself (it had the keyboard). Same rule as
         // the system shortcut: open ↔ closed, every single press.
-        // same as the system shortcut: the core flips open ↔ closed
-        dbg(`page Shift+Space → toggle (shown=${shown})`);
-        invoke("ask_toggle").catch(() => {});
+        dbg(`page Shift+Space (shown=${shown} closing=${closing})`);
+        if (shown && !closing && !EMBED) {
+          // close right here: the animation starts this instant, and the core
+          // hides the window when it's done (ask_hide_after also marks "closed")
+          hide("page Shift+Space");
+        } else if (shown && closing && !EMBED) {
+          cancelClose(); // changed my mind: stay open (instant, then tells the core)
+        } else {
+          // hidden page that still had the keyboard / closing / embedded:
+          // let the core flip open ↔ closed
+          invoke("ask_toggle").catch(() => {});
+        }
       }
       return;
     }
