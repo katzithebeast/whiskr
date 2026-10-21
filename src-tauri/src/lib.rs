@@ -1856,6 +1856,7 @@ async fn ask_models(app: AppHandle, engine: String) -> Result<Vec<agents::ModelI
 /// From the ask window: open the main app (optionally on a page).
 #[tauri::command]
 fn open_main(app: AppHandle, page: Option<String>) {
+    ASK_WANT.store(false, AO::SeqCst);
     hide_ask(&app);
     show_main(&app);
     if let Some(p) = page {
@@ -2033,6 +2034,7 @@ async fn ask_close_cancel(app: AppHandle) {
 #[tauri::command]
 async fn ask_hide(app: AppHandle) {
     // the page closed it itself: the safety hide isn't needed any more
+    ASK_WANT.store(false, AO::SeqCst);
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     hide_ask(&app);
 }
@@ -2066,8 +2068,6 @@ fn clear_region(hwnd: isize) {
 
 fn hide_ask(app: &AppHandle) {
     dlog!("hide_ask");
-    ASK_WANT.store(false, AO::SeqCst);
-    ASK_CLOSING.store(false, AO::SeqCst);
     if let Some(w) = app.get_webview_window("ask") {
         // Clip everything away first: when the window comes back, WebView2 shows
         // its last frame for a moment — with an empty region that frame is never
@@ -2081,18 +2081,15 @@ fn hide_ask(app: &AppHandle) {
         let t0 = Instant::now();
         #[cfg(windows)]
         if ask_h != 0 {
-            clear_region(ask_h);
-            // Hide for real at the Windows level too. The window is shown with a
-            // raw ShowWindow (so it doesn't steal focus before Ctrl+C); if it is
-            // closed again before the window library is told it's visible, the
-            // library's own hide() is a no-op and the chat stayed open, invisible
-            // — every further Shift+Space then just "closed" it again.
+            // Hide first (cheap), then clip the hidden window to nothing so the
+            // next show never flashes an old frame (no repaint: it's hidden).
             unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(ask_h as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
             }
+            let t1 = t0.elapsed().as_millis();
+            clear_region(ask_h);
+            dlog!("hide_ask: hide {} ms, clear region {} ms", t1, t0.elapsed().as_millis() - t1);
         }
-        #[cfg(windows)]
-        dlog!("hide_ask: region+hide took {} ms", t0.elapsed().as_millis());
         #[cfg(not(windows))]
         let _ = w.hide();
         // Give the keyboard back to where it was. Otherwise it stays on the
@@ -2108,11 +2105,18 @@ fn hide_ask(app: &AppHandle) {
         dlog!("hide_ask: visible after = {}", ask_visible(app));
         let _ = app.emit_to("ask", "whiskr:ask-hidden", ());
     }
+    ASK_CLOSING.store(false, AO::SeqCst);
+    // Shift+Space pressed again while it was closing? Then open it again now.
+    if ASK_WANT.load(AO::SeqCst) {
+        dlog!("hide_ask: reopened meanwhile");
+        kick_ask();
+    }
 }
 
 /// Hide the ask window and paste the text where the user was typing.
 #[tauri::command]
 fn ask_insert(app: AppHandle, text: String) {
+    ASK_WANT.store(false, AO::SeqCst);
     hide_ask(&app);
     let target = *app.state::<AppState>().ask_target.lock();
     std::thread::spawn(move || {
@@ -2197,7 +2201,11 @@ async fn ask_region(app: AppHandle, x: f64, y: f64, w: f64, h: f64, r: f64) {
         unsafe {
             let rgn = CreateRoundRectRgn(px(x), px(y), px(x + w) + 1, px(y + h) + 1, px(r * 2.0), px(r * 2.0));
             // the system owns the region afterwards
-            SetWindowRgn(hwnd as _, rgn, 1);
+            // bRedraw = 0: no forced synchronous repaint of the whole window.
+            // With the big chat that repaint kept the UI thread busy for 1–3 s
+            // (and everything — closing included — queued up behind it).
+            // WebView2 composes through DWM, so the new shape still shows at once.
+            SetWindowRgn(hwnd as _, rgn, 0);
         }
     }
     #[cfg(not(windows))]
