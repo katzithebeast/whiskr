@@ -1334,7 +1334,54 @@ fn profile_key(s: &Settings, id: Option<&str>) -> String {
 /// Height of the collapsed ask bar (the page measures itself and tells us).
 static ASK_COMPACT_H: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(62);
 
+/// Windows: put the (always full-size) chat window at the bottom centre of the
+/// monitor with the mouse — straight through Win32 and only when it has to
+/// move, so opening never waits on the UI thread.
+#[cfg(windows)]
+fn place_ask_raw() -> bool {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER};
+    static LAST: parking_lot::Mutex<(i32, i32, i32, i32)> = parking_lot::const_mutex((0, 0, 0, 0));
+    let h = ASK_HWND.load(AO::SeqCst);
+    if h == 0 {
+        return false;
+    }
+    unsafe {
+        let mut pt = POINT { x: 0, y: 0 };
+        GetCursorPos(&mut pt);
+        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(mon, &mut mi) == 0 {
+            return false;
+        }
+        let (mut dx, mut dy) = (96u32, 96u32);
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        let sf = dx.max(96) as f64 / 96.0;
+        let wa = mi.rcWork;
+        let (ww, wh) = ((wa.right - wa.left) as f64, (wa.bottom - wa.top) as f64);
+        let pw = (820.0 * sf) as i32;
+        let ph = ((620.0 * sf).min(wh - 40.0 * sf)) as i32;
+        let x = wa.left + (ww as i32 - pw) / 2;
+        let y = wa.top + wh as i32 - ph - (56.0 * sf) as i32;
+        let want = (x, y, pw, ph);
+        let mut last = LAST.lock();
+        if *last != want {
+            *last = want;
+            SetWindowPos(h as _, std::ptr::null_mut(), x, y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+    }
+    true
+}
+
 fn place_ask(app: &AppHandle, expanded: bool) {
+    #[cfg(windows)]
+    if place_ask_raw() {
+        let _ = expanded;
+        return;
+    }
     let Some(w) = app.get_webview_window("ask") else { return };
     let monitor = app
         .cursor_position()
@@ -1400,10 +1447,10 @@ fn ask_show_focus(app: &AppHandle) {
             if IsWindowVisible(h as _) == 0 {
                 ShowWindow(h as _, SW_SHOW);
             }
-            bare_ask_frame(h);
             if GetForegroundWindow() as isize == h {
                 return;
             }
+            let t0 = Instant::now();
             if SetForegroundWindow(h as _) == 0 {
                 // Windows refused: a tap of Alt grants the right to switch (same trick the window library uses)
                 let sc = MapVirtualKeyW(VK_LMENU as u32, MAPVK_VK_TO_VSC) as u16;
@@ -1412,6 +1459,7 @@ fn ask_show_focus(app: &AppHandle) {
                 SendInput(2, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32);
                 SetForegroundWindow(h as _);
             }
+            dlog!("ask_show_focus: SetForegroundWindow took {} ms", t0.elapsed().as_millis());
         }
         let _ = app;
     }
@@ -1505,14 +1553,13 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     // to go to the app the user was in. The page keeps the panel invisible until
     // the "show" event, so the intro animation is what you actually see.
     #[cfg(windows)]
-    match w.hwnd() {
-        Ok(h) => unsafe {
-            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h.0 as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE);
-            bare_ask_frame(h.0 as isize);
-        },
-        Err(_) => {
-            let _ = w.show();
+    {
+        let h = ASK_HWND.load(AO::SeqCst);
+        let t0 = Instant::now();
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE);
         }
+        dlog!("open_ask: ShowWindow took {} ms", t0.elapsed().as_millis());
     }
     #[cfg(not(windows))]
     let _ = w.show();
@@ -2004,9 +2051,9 @@ fn close_ask(app: &AppHandle) {
     let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     dlog!("close_ask gen={gen}");
     let _ = app.emit_to("ask", "whiskr:ask-close", ());
-    // Hide on our own clock: the page only plays the animation. If it's busy
-    // (an answer streaming in), closing still happens right on time.
-    hide_ask_later(app, gen, 230);
+    // The page plays the close animation and then asks us to hide (ask_hide_after).
+    // If it doesn't answer in time (busy), hide anyway — never later than this.
+    hide_ask_later(app, gen, 650);
 }
 
 #[cfg(windows)]
@@ -2030,6 +2077,9 @@ fn hide_ask(app: &AppHandle) {
         #[cfg(windows)]
         let had_keyboard = ask_h != 0 && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == ask_h;
         #[cfg(windows)]
+        #[cfg(windows)]
+        let t0 = Instant::now();
+        #[cfg(windows)]
         if ask_h != 0 {
             clear_region(ask_h);
             // Hide for real at the Windows level too. The window is shown with a
@@ -2041,6 +2091,8 @@ fn hide_ask(app: &AppHandle) {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(ask_h as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
             }
         }
+        #[cfg(windows)]
+        dlog!("hide_ask: region+hide took {} ms", t0.elapsed().as_millis());
         #[cfg(not(windows))]
         let _ = w.hide();
         // Give the keyboard back to where it was. Otherwise it stays on the
