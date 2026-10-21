@@ -1837,9 +1837,14 @@ fn ask_hide_after(app: AppHandle, ms: u64) {
 
 /// The page decided to stay open after all: drop the pending safety hide.
 #[tauri::command]
-fn ask_close_cancel() {
+fn ask_close_cancel(app: AppHandle) {
     dlog!("ask_close_cancel");
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    // it stays open: make sure the window library knows and it has the keyboard
+    if let Some(w) = app.get_webview_window("ask") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -1884,8 +1889,17 @@ fn hide_ask(app: &AppHandle) {
         #[cfg(windows)]
         if let Ok(h) = w.hwnd() {
             clear_region(h.0 as isize);
+            // Hide for real at the Windows level too. The window is shown with a
+            // raw ShowWindow (so it doesn't steal focus before Ctrl+C); if it is
+            // closed again before the window library is told it's visible, the
+            // library's own hide() is a no-op and the chat stayed open, invisible
+            // — every further Shift+Space then just "closed" it again.
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h.0 as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
         }
         let _ = w.hide();
+        dlog!("hide_ask: visible after = {:?}", w.is_visible());
         let _ = app.emit_to("ask", "whiskr:ask-hidden", ());
     }
 }
