@@ -1029,7 +1029,16 @@ window.addEventListener(
       if (!typedSinceShift && !e.repeat) {
         e.preventDefault();
         e.stopPropagation();
-        hide("page Shift+Space");
+        // The page got the shortcut itself (it had the keyboard). Same rule as
+        // the system shortcut: open ↔ closed, every single press.
+        if (EMBED || !shown) {
+          dbg(`page Shift+Space → toggle (shown=${shown})`);
+          invoke("ask_toggle").catch(() => {});
+        } else if (closing) {
+          cancelClose();
+        } else {
+          hide("page Shift+Space");
+        }
       }
       return;
     }

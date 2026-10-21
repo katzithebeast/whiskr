@@ -91,6 +91,9 @@ pub struct AppState {
     /// Whiskr Ask: installed CLIs, the window we came from, run ids.
     tools: Mutex<Vec<agents::Tool>>,
     ask_target: Mutex<isize>,
+    /// The window that had the keyboard before the chat opened — it gets it
+    /// back when the chat closes.
+    ask_return: Mutex<isize>,
     run_seq: std::sync::atomic::AtomicU64,
     data_dir: PathBuf,
     /// Tasks & reminders.
@@ -1382,8 +1385,15 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     let target = context::foreground();
     let ours = target.exe.starts_with("whiskr");
     #[cfg(windows)]
-    if !ours {
-        *state.ask_target.lock() = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
+    {
+        let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
+        let ask_h = w.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+        if fg != 0 && fg != ask_h {
+            *state.ask_return.lock() = fg;
+        }
+        if !ours {
+            *state.ask_target.lock() = fg;
+        }
     }
     let want_sel = state.settings.lock().ask_selection && !ours && !TERMINALS.contains(&target.exe.as_str()) && !target.exe.is_empty();
     let was_visible = w.is_visible().unwrap_or(false);
@@ -1827,6 +1837,13 @@ fn hide_ask_later(app: &AppHandle, gen: u64, ms: u64) {
     });
 }
 
+/// Shift+Space reached the chat page itself (it had the keyboard) — act like the shortcut.
+#[tauri::command]
+fn ask_toggle(app: AppHandle) {
+    dlog!("ask_toggle from page");
+    toggle_ask(&app);
+}
+
 /// The page started its closing animation: hide the window after `ms`
 /// (unless it's opened again / the close is cancelled meanwhile).
 #[tauri::command]
@@ -1887,6 +1904,8 @@ fn hide_ask(app: &AppHandle) {
         // its last frame for a moment — with an empty region that frame is never
         // seen; the page sets the real region once it's ready.
         #[cfg(windows)]
+        let had_keyboard = w.hwnd().map(|h| unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == h.0 as isize).unwrap_or(false);
+        #[cfg(windows)]
         if let Ok(h) = w.hwnd() {
             clear_region(h.0 as isize);
             // Hide for real at the Windows level too. The window is shown with a
@@ -1899,6 +1918,16 @@ fn hide_ask(app: &AppHandle) {
             }
         }
         let _ = w.hide();
+        // Give the keyboard back to where it was. Otherwise it stays on the
+        // hidden chat: the next Shift+Space lands in the invisible page instead
+        // of reaching Whiskr's shortcut, and nothing opens.
+        #[cfg(windows)]
+        if had_keyboard {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, IsWindowVisible, SetForegroundWindow};
+            let back = *app.state::<AppState>().ask_return.lock();
+            let ok = back != 0 && unsafe { IsWindow(back as _) != 0 && IsWindowVisible(back as _) != 0 && SetForegroundWindow(back as _) != 0 };
+            dlog!("hide_ask: keyboard back to previous window: {ok}");
+        }
         dlog!("hide_ask: visible after = {:?}", w.is_visible());
         let _ = app.emit_to("ask", "whiskr:ask-hidden", ());
     }
@@ -2281,6 +2310,7 @@ pub fn run() {
                 rec_item: Mutex::new(None),
                 tools: Mutex::new(vec![]),
                 ask_target: Mutex::new(0),
+                ask_return: Mutex::new(0),
                 run_seq: std::sync::atomic::AtomicU64::new(1),
                 data_dir: data_dir.clone(),
                 tasks: Mutex::new(vec![]),
@@ -2474,6 +2504,7 @@ pub fn run() {
             ask_hide,
             ask_close_cancel,
             ask_hide_after,
+            ask_toggle,
             dbg_log,
             check_update,
             install_update,

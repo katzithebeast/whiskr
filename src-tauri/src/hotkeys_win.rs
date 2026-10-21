@@ -240,6 +240,21 @@ fn send(ev: Event) {
     }
 }
 
+/// A window of this process (Whiskr) is in front.
+fn own_window_in_front() -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, &mut pid);
+        pid == GetCurrentProcessId()
+    }
+}
+
 /// The Ask window is the foreground window.
 pub fn ask_in_front() -> bool {
     let h = state().lock().ask_hwnd;
@@ -371,6 +386,9 @@ fn handle_key(vk: u32, scan: u32, is_down: bool) -> Option<bool> {
             .find(|b| b.mods == mods && (b.scan.map(|x| x == scan).unwrap_or(false) || b.vk.map(|x| x == vk).unwrap_or(false)))
             .filter(|b| !(b.mods == SHIFT && (dirty || fullscreen_foreground())))
             .cloned();
+        if vk == 0x20 && mods == 0 && own_window_in_front() {
+            crate::dlog::log(format!("hook Space with no modifiers while Whiskr is in front (async shift={})", down(VK_SHIFT)));
+        }
         if vk == 0x20 && mods != 0 {
             crate::dlog::log(format!(
                 "hook Space mods={mods} hit={} dirty={} held={:?}",
