@@ -2,8 +2,8 @@
 import { cat, keyLabels } from "./cat.js";
 
 export const CHANGELOG = [
-  { v: "0.16.5", d: "2026-10-21",
-    cs: ["Shift+Space: každý stisk otevře nebo zavře", "Po zavření chatu se klávesnice vrátí do okna, kde jsi byl — dřív zůstala na schovaném chatu a další Shift+Space nic neudělalo."],
+  { v: "0.16.6", d: "2026-10-21",
+    cs: ["Shift+Space: každý stisk otevře nebo zavře", "Zkratka jen přepíná „chci otevřeno / zavřeno“ a okno se tomu hned přizpůsobí — i když zrovna běží agent. Klávesnice se po zavření vrací do okna, kde jsi byl. Spouštění agentů už nezamrazí aplikaci."],
     en: ["Shift+Space: every press opens or closes", "After the chat closes, the keyboard goes back to the window you were in — it used to stay on the hidden chat, so the next Shift+Space did nothing."] },
   { v: "0.16.4", d: "2026-10-21",
     cs: ["Vzorce v chatu", "Matematické vzorce v odpovědích ($…$, $$…$$, \\(…\\), \\[…\\]) se vykreslí jako opravdové vzorce, ne jako text."],

@@ -1359,16 +1359,79 @@ fn place_ask(app: &AppHandle, expanded: bool) {
     let _ = w.set_position(PhysicalPosition::new(x, y));
 }
 
-fn toggle_ask(app: &AppHandle) {
-    let swap = app.state::<AppState>().settings.lock().ask_space_new;
-    open_ask(app, swap, false)
+// ─── the quick chat: one source of truth ───
+//
+// Shift+Space only flips what the user WANTS (open / closed). A single
+// "applier" thread then makes the window match. If Whiskr is busy for a
+// moment, presses don't pile up into open-close-open-close: they just flip
+// the wish, and the window ends up exactly where the last press wanted it.
+static ASK_WANT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Close animation running (the window is still on screen for ~0.2 s).
+static ASK_CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static ASK_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+static ASK_KICK: std::sync::OnceLock<parking_lot::Mutex<std::sync::mpsc::Sender<()>>> = std::sync::OnceLock::new();
+use std::sync::atomic::Ordering as AO;
+
+/// Is the chat window on screen? Asked straight from Windows — no waiting for the UI thread.
+fn ask_visible(app: &AppHandle) -> bool {
+    #[cfg(windows)]
+    {
+        let h = ASK_HWND.load(AO::SeqCst);
+        if h != 0 {
+            return unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(h as _) != 0 };
+        }
+    }
+    app.get_webview_window("ask").and_then(|w| w.is_visible().ok()).unwrap_or(false)
+}
+
+fn start_ask_applier(app: AppHandle) {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let _ = ASK_KICK.set(parking_lot::Mutex::new(tx));
+    std::thread::Builder::new()
+        .name("whiskr-ask-applier".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                while rx.try_recv().is_ok() {} // coalesce presses that came meanwhile
+                let (want, vis, closing) = (ASK_WANT.load(AO::SeqCst), ask_visible(&app), ASK_CLOSING.load(AO::SeqCst));
+                dlog!("ask applier: want={want} visible={vis} closing={closing}");
+                if want && !vis {
+                    let swap = app.state::<AppState>().settings.lock().ask_space_new;
+                    open_ask(&app, swap, false);
+                } else if want && vis && closing {
+                    // pressed again during the close animation: stay open
+                    CLOSE_GEN.fetch_add(1, AO::SeqCst);
+                    ASK_CLOSING.store(false, AO::SeqCst);
+                    let _ = app.emit_to("ask", "whiskr:ask-reopen", ());
+                    if let Some(w) = app.get_webview_window("ask") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                } else if !want && vis && !closing {
+                    close_ask(&app);
+                }
+            }
+        })
+        .ok();
+}
+
+fn kick_ask() {
+    if let Some(tx) = ASK_KICK.get() {
+        let _ = tx.lock().send(());
+    }
+}
+
+fn toggle_ask(_app: &AppHandle) {
+    let was = ASK_WANT.fetch_xor(true, AO::SeqCst);
+    dlog!("toggle_ask: want {}", !was);
+    kick_ask();
 }
 
 /// Shift+Space: show / hide. Shift+Space+R (`fresh`): always a brand new chat.
 fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     let Some(w) = app.get_webview_window("ask") else { return };
-    dlog!("open_ask fresh={fresh} chord={chord} visible={:?}", w.is_visible());
-    if w.is_visible().unwrap_or(false) {
+    let visible = ask_visible(app);
+    dlog!("open_ask fresh={fresh} chord={chord} visible={visible}");
+    if visible {
         // R pressed right after Shift+Space opened it: switch to the other kind of chat.
         let recent = std::mem::take(&mut *app.state::<AppState>().ask_just_opened.lock()).map_or(false, |t| t.elapsed() < Duration::from_millis(1500));
         if chord && recent {
@@ -1379,6 +1442,8 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
         close_ask(app);
         return;
     }
+    ASK_WANT.store(true, AO::SeqCst);
+    ASK_CLOSING.store(false, AO::SeqCst);
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     *app.state::<AppState>().ask_just_opened.lock() = Some(Instant::now());
     let state = app.state::<AppState>();
@@ -1396,7 +1461,7 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
         }
     }
     let want_sel = state.settings.lock().ask_selection && !ours && !TERMINALS.contains(&target.exe.as_str()) && !target.exe.is_empty();
-    let was_visible = w.is_visible().unwrap_or(false);
+    let was_visible = false;
     if !was_visible {
         // always appear as the small bar; the page slides it up if a chat continues
         place_ask(app, false);
@@ -1536,8 +1601,10 @@ struct AskRunArgs {
     model: Option<String>,
 }
 
+// async = runs off the UI thread: starting WSL/Codex can take seconds and used
+// to freeze every window (and Shift+Space) meanwhile.
 #[tauri::command]
-fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
+async fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
     let state = app.state::<AppState>();
     let id = state.run_seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let delegate = req.mode == "delegate";
@@ -1725,6 +1792,8 @@ fn open_main(app: AppHandle, page: Option<String>) {
 #[tauri::command]
 fn ask_open_with(app: AppHandle, text: String, send: bool) {
     let Some(w) = app.get_webview_window("ask") else { return };
+    ASK_WANT.store(true, AO::SeqCst);
+    ASK_CLOSING.store(false, AO::SeqCst);
     place_ask(&app, true);
     let _ = w.show();
     let _ = w.set_focus();
@@ -1837,6 +1906,27 @@ fn hide_ask_later(app: &AppHandle, gen: u64, ms: u64) {
     });
 }
 
+/// Diagnostics: note in the log whenever the UI thread is stuck for a while.
+fn watch_main_thread(app: AppHandle) {
+    std::thread::Builder::new()
+        .name("whiskr-ui-watchdog".into())
+        .spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(400));
+            let t0 = Instant::now();
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            if app.run_on_main_thread(move || {
+                let _ = tx.send(());
+            }).is_err() {
+                return;
+            }
+            if rx.recv_timeout(Duration::from_millis(400)).is_err() {
+                let _ = rx.recv_timeout(Duration::from_secs(30));
+                dlog!("UI thread was busy for {} ms", t0.elapsed().as_millis());
+            }
+        })
+        .ok();
+}
+
 /// Shift+Space reached the chat page itself (it had the keyboard) — act like the shortcut.
 #[tauri::command]
 fn ask_toggle(app: AppHandle) {
@@ -1848,6 +1938,8 @@ fn ask_toggle(app: AppHandle) {
 /// (unless it's opened again / the close is cancelled meanwhile).
 #[tauri::command]
 fn ask_hide_after(app: AppHandle, ms: u64) {
+    ASK_WANT.store(false, AO::SeqCst);
+    ASK_CLOSING.store(true, AO::SeqCst);
     let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     hide_ask_later(&app, gen, ms.clamp(0, 600));
 }
@@ -1856,6 +1948,8 @@ fn ask_hide_after(app: AppHandle, ms: u64) {
 #[tauri::command]
 fn ask_close_cancel(app: AppHandle) {
     dlog!("ask_close_cancel");
+    ASK_WANT.store(true, AO::SeqCst);
+    ASK_CLOSING.store(false, AO::SeqCst);
     CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     // it stays open: make sure the window library knows and it has the keyboard
     if let Some(w) = app.get_webview_window("ask") {
@@ -1877,10 +1971,11 @@ static CLOSE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 /// Ask the page to play its closing animation (it then calls ask_hide);
 /// if the page never answers, hide anyway.
 fn close_ask(app: &AppHandle) {
-    let Some(w) = app.get_webview_window("ask") else { return };
-    if !w.is_visible().unwrap_or(false) {
+    ASK_WANT.store(false, AO::SeqCst);
+    if !ask_visible(app) {
         return;
     }
+    ASK_CLOSING.store(true, AO::SeqCst);
     let gen = CLOSE_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     dlog!("close_ask gen={gen}");
     let _ = app.emit_to("ask", "whiskr:ask-close", ());
@@ -1899,6 +1994,8 @@ fn clear_region(hwnd: isize) {
 
 fn hide_ask(app: &AppHandle) {
     dlog!("hide_ask");
+    ASK_WANT.store(false, AO::SeqCst);
+    ASK_CLOSING.store(false, AO::SeqCst);
     if let Some(w) = app.get_webview_window("ask") {
         // Clip everything away first: when the window comes back, WebView2 shows
         // its last frame for a moment — with an empty region that frame is never
@@ -2003,7 +2100,7 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
 /// Clip the ask window to the visible panel (CSS px, relative to the window).
 /// Outside it the window doesn't exist: nothing drawn, clicks go through.
 #[tauri::command]
-fn ask_region(app: AppHandle, x: f64, y: f64, w: f64, h: f64, r: f64) {
+async fn ask_region(app: AppHandle, x: f64, y: f64, w: f64, h: f64, r: f64) {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
@@ -2343,6 +2440,7 @@ pub fn run() {
             if let Some(ask) = app.get_webview_window("ask") {
                 #[cfg(windows)]
                 if let Ok(h) = ask.hwnd() {
+                    ASK_HWND.store(h.0 as isize, AO::SeqCst);
                     hotkeys_win::set_ask_window(h.0 as isize);
                     no_dwm_transitions(h.0 as isize);
                     bare_ask_frame(h.0 as isize);
@@ -2416,6 +2514,8 @@ pub fn run() {
             });
 
             watch_updates(handle.clone());
+            start_ask_applier(handle.clone());
+            watch_main_thread(handle.clone());
             let started_in_background = std::env::args().any(|a| a == "--background");
             if first_run || !started_in_background {
                 // Don't show the window until the page has painted its intro

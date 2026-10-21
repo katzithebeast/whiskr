@@ -1031,14 +1031,9 @@ window.addEventListener(
         e.stopPropagation();
         // The page got the shortcut itself (it had the keyboard). Same rule as
         // the system shortcut: open ↔ closed, every single press.
-        if (EMBED || !shown) {
-          dbg(`page Shift+Space → toggle (shown=${shown})`);
-          invoke("ask_toggle").catch(() => {});
-        } else if (closing) {
-          cancelClose();
-        } else {
-          hide("page Shift+Space");
-        }
+        // same as the system shortcut: the core flips open ↔ closed
+        dbg(`page Shift+Space → toggle (shown=${shown})`);
+        invoke("ask_toggle").catch(() => {});
       }
       return;
     }
@@ -1166,10 +1161,14 @@ function hide(why = "") {
 }
 // Shift+Space again while it is closing = changed my mind: stay open.
 // (the key can reach us twice — system hook and page — so ignore a repeat within 350 ms)
+// The core decides open/closed (one source of truth); the page only animates.
 listen("whiskr:ask-close", () => {
   dbg(`ask-close closing=${closing} shown=${shown}`);
-  if (!closing) return hide("hotkey");
-  if (performance.now() - closeAt > 120) cancelClose();
+  if (!closing) hide("hotkey");
+});
+listen("whiskr:ask-reopen", () => {
+  dbg("ask-reopen");
+  if (closing) cancelClose();
 });
 $("#close-btn").addEventListener("click", () => hide("close button"));
 $("#pin-btn").addEventListener("click", () => {
