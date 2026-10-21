@@ -292,3 +292,10 @@ html.embed, html.embed body { background: transparent; }
 .shell[data-state="expanded"] .panel.leave { animation-name: chatOut; animation-timing-function: cubic-bezier(.4,0,1,1); }
 @keyframes chatOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(18px) scale(.975); } }
 .panel.leave { will-change: transform, opacity; pointer-events: none; }
+
+/* formulas (KaTeX) */
+.body .katex { font-size: 1.08em; color: var(--text); }
+.body .katex-display { margin: 10px 0; padding: 8px 4px; overflow-x: auto; overflow-y: hidden; }
+.body .katex-display::-webkit-scrollbar { height: 6px; }
+.body .katex-display::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 6px; }
+.body .math-raw { font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; margin: 8px 0; }

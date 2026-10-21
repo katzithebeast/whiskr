@@ -1,6 +1,7 @@
 // Whiskr Ask — one shortcut for quick questions, a Claude × GPT debate,
 // and delegating work to Claude Code / Codex / Cursor in a project folder.
 import { cat } from "./cat.js";
+import { extractMath, restoreMath } from "./math.js";
 
 const TAURI = window.__TAURI__;
 const api = TAURI ? { invoke: TAURI.core.invoke, listen: TAURI.event.listen } : mockApi();
@@ -177,6 +178,9 @@ function md(src, streaming) {
       out.push(`<pre><button class="cp">${T.copy}</button><code>${esc(code.replace(/\n$/, ""))}</code></pre>`);
       return;
     }
+    const mark = out.length;
+    const math = extractMath(part);
+    part = math.text;
     let list = null;
     const close = () => {
       if (list) out.push(`</${list}>`);
@@ -200,6 +204,7 @@ function md(src, streaming) {
       } else close();
     }
     close();
+    if (math.blocks.length) out.splice(mark, out.length - mark, restoreMath(out.slice(mark).join(""), math.blocks));
   });
   let html = out.join("");
   if (streaming) {

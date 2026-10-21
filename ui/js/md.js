@@ -1,4 +1,5 @@
-// Tiny, safe Markdown → HTML (headings, lists, bold/italic, code, links).
+// Tiny, safe Markdown → HTML (headings, lists, bold/italic, code, links, math).
+import { extractMath, restoreMath } from "./math.js";
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function inline(s) {
@@ -20,6 +21,9 @@ export function md(src) {
         out.push(`<pre><code>${esc((nl >= 0 ? part.slice(nl + 1) : part).replace(/\n$/, ""))}</code></pre>`);
         return;
       }
+      const mark = out.length;
+      const math = extractMath(part);
+      part = math.text;
       let list = null;
       const close = () => {
         if (list) out.push(`</${list}>`);
@@ -45,6 +49,7 @@ export function md(src) {
         } else close();
       }
       close();
+      if (math.blocks.length) out.splice(mark, out.length - mark, restoreMath(out.slice(mark).join(""), math.blocks));
     });
   return out.join("");
 }
