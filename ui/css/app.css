@@ -938,3 +938,8 @@ textarea.games { width: 100%; min-height: 70px; resize: vertical; font-family: u
 .upd-bar { width: 120px; height: 6px; border-radius: 6px; background: var(--sand); overflow: hidden; }
 .upd-bar i { display: block; height: 100%; width: 0; background: var(--black); transition: width .2s; }
 .upd .btn-cream { background: var(--black); color: var(--cream); }
+.cs-list .side-item .t .snip { display: block; font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.act-item { display: grid; grid-template-columns: 150px 1fr auto; gap: 8px; align-items: start; }
+.act-item .act-name { display: flex; align-items: center; gap: 4px; font-weight: 800; color: var(--stone-ink, inherit); }
+.act-item .act-name input { min-width: 0; }
+.act-item textarea { resize: vertical; min-height: 38px; font: inherit; }

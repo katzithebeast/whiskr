@@ -43,7 +43,7 @@ const L = {
     h_send: "<b>Enter</b> odeslat", h_nl: "<b>Shift+Enter</b> nový řádek", h_modes: "<b>Ctrl+1/2/3</b> režim", h_at: "<b>@gpt</b> <b>@claude</b> model", h_esc: "<b>Esc</b> zavřít", h_ins: "<b>Ctrl+Enter</b> vložit odpověď",
     not_installed: "nenainstalováno", no_key: "chybí klíč", runs: "běží",
     new: "Nový chat", hist: "Historie", pin: "Nechat otevřené", hist_empty: "Zatím žádné konverzace.",
-    empty_ask: "Zeptej se na cokoliv. <b>Označený text</b> se přiloží sám.",
+    empty_ask: "Zeptej se na cokoliv. <b>Označený text</b> se přiloží sám, soubory přetáhni nebo vlož přes Ctrl+V. Napiš <b>/</b> pro akce — třeba <b>/screen</b> co je tu špatně?",
     empty_debate: "Claude a GPT odpoví zároveň. Pak je nech <b>probrat</b> a <b>shrnout</b>.",
     empty_delegate: "Zadej úkol, vyber projekt a agent ho udělá. Můžeš zatím dělat něco jiného — dám vědět, až bude hotovo.",
     need_two: "Na debatu potřebuju aspoň dva modely (Claude, Codex, Cursor nebo Groq).",
@@ -55,6 +55,8 @@ const L = {
     open_app: "Otevřít Whiskr", dashboard: "Dashboard", settings: "Nastavení", new_chat: "Nový chat", more: "Další možnosti", def_model: "Výchozí model", loading_models: "Načítám modely…", search: "Hledat v chatech…", g_today: "Dnes", g_yesterday: "Včera", g_week: "Tento týden", g_older: "Starší", del: "Smazat",
     err_auth: "Přihlášení vypršelo — přihlas se znovu (otevře se okno terminálu, stačí potvrdit v prohlížeči).", relogin: "Přihlásit znovu",
     h_slash: "<b>/brief</b> Acme · <b>/úkol</b> …",
+    att_only: "Podívej se na přílohy.", attach: "Přiložit soubor (nebo přetáhni / Ctrl+V)", shooting: "Fotím obrazovku…",
+    sl_screen: "snímek obrazovky + tvoje zpráva", sl_brief: "podklady před schůzkou s…", sl_task: "úkol / připomínka", drop_here: "Pusť soubory sem",
   },
   en: {
     m_ask: "Ask", m_debate: "Debate", m_delegate: "Delegate",
@@ -71,7 +73,7 @@ const L = {
     h_send: "<b>Enter</b> send", h_nl: "<b>Shift+Enter</b> new line", h_modes: "<b>Ctrl+1/2/3</b> mode", h_at: "<b>@gpt</b> <b>@claude</b> model", h_esc: "<b>Esc</b> close", h_ins: "<b>Ctrl+Enter</b> insert answer",
     not_installed: "not installed", no_key: "no key", runs: "running",
     new: "New chat", hist: "History", pin: "Keep open", hist_empty: "No conversations yet.",
-    empty_ask: "Ask anything. <b>Selected text</b> is attached automatically.",
+    empty_ask: "Ask anything. <b>Selected text</b> is attached automatically; drop files or paste them with Ctrl+V. Type <b>/</b> for actions — e.g. <b>/screen</b> what's wrong here?",
     empty_debate: "Claude and GPT answer side by side. Then let them <b>debate</b> and <b>sum it up</b>.",
     empty_delegate: "Describe a task, pick a project and the agent does it. Keep working — I'll tell you when it's done.",
     need_two: "A debate needs at least two models (Claude, Codex, Cursor or Groq).",
@@ -83,6 +85,8 @@ const L = {
     open_app: "Open Whiskr", dashboard: "Dashboard", settings: "Settings", new_chat: "New chat", more: "More", def_model: "Default model", loading_models: "Loading models…", search: "Search chats…", g_today: "Today", g_yesterday: "Yesterday", g_week: "This week", g_older: "Older", del: "Delete",
     err_auth: "Your login expired — log in again (a terminal opens, just confirm in the browser).", relogin: "Log in again",
     h_slash: "<b>/brief</b> Acme · <b>/task</b> …",
+    att_only: "Have a look at the attachments.", attach: "Attach a file (or drop / Ctrl+V)", shooting: "Taking a screenshot…",
+    sl_screen: "screenshot + your message", sl_brief: "brief before meeting with…", sl_task: "task / reminder", drop_here: "Drop files here",
   },
 };
 let T = L.cs;
@@ -95,6 +99,9 @@ let convs = [];
 let pinned = false;
 let selection = null; // { text, app }
 let dialogOpen = false;
+// files waiting to go with the next message: { name, path, image, size }
+let pending = [];
+let shooting = false;
 const runs = new Map(); // run id → answer object
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -215,6 +222,16 @@ function md(src, streaming) {
 }
 
 // ───────── rendering ─────────
+const fileSrc = (p) => (TAURI?.core?.convertFileSrc ? TAURI.core.convertFileSrc(p) : p);
+function filesHtml(files) {
+  if (!files?.length) return "";
+  const imgs = files.filter((f) => f.image);
+  const docs = files.filter((f) => !f.image);
+  let h = "";
+  if (imgs.length) h += `<div class="ufiles">${imgs.map((f) => `<a class="uimg" data-act="file" data-path="${esc(f.path)}" title="${esc(f.name)}"><img src="${esc(fileSrc(f.path))}" alt="" loading="lazy" /></a>`).join("")}</div>`;
+  if (docs.length) h += `<div class="ufiles">${docs.map((f) => `<a class="udoc" data-act="file" data-path="${esc(f.path)}" title="${esc(f.path)}">📄 ${esc(f.name)}</a>`).join("")}</div>`;
+  return h;
+}
 function whoHtml(a) {
   const e = ENGINES[a.engine] || ENGINES.groq;
   const meta = a.meta ? `<span class="meta">· ${esc(a.meta)}</span>` : "";
@@ -347,7 +364,7 @@ function render() {
   for (const it of conv.items) {
     if (it.type === "user") {
       const note = it.ctx ? `<span class="ctxnote">📎 ${esc(T.sel)}${it.ctxApp ? ` ${T.from} ${esc(it.ctxApp)}` : ""}</span>` : "";
-      html += `<div class="u">${note}${esc(it.text)}</div>`;
+      html += `<div class="u">${note}${filesHtml(it.files)}${esc(it.text)}</div>`;
     } else if (it.type === "answer") {
       html += answerHtml(it);
     } else if (it.type === "pair") {
@@ -430,7 +447,7 @@ function renderChrome() {
   $("#input").placeholder = voiceState === "listening" ? T.v_listen : voiceState === "thinking" ? T.v_think : conv.mode === "debate" ? T.ph_debate : conv.mode === "delegate" ? T.ph_delegate : T.ph_ask;
   const busy = [...runs.values()].some((a) => a.conv === conv.id);
   void busy;
-  $("#send").classList.toggle("ready", !!$("#input").value.trim() || !!selection);
+  $("#send").classList.toggle("ready", !!$("#input").value.trim() || !!selection || pending.length > 0);
   const bg = [...runs.values()].filter((a) => a.mode === "delegate").length;
   $("#runs").hidden = !bg;
   $("#runs").innerHTML = bg ? `<span class="spin"></span>${bg} ${T.runs}` : "";
@@ -441,7 +458,7 @@ function renderChrome() {
   $("#pin-btn").classList.toggle("on", pinned);
   renderCtx();
   renderHint();
-  requestAnimationFrame(() => fitCompact($("#engine-menu").hidden ? 0 : $("#engine-menu").offsetHeight + 10));
+  requestAnimationFrame(() => fitCompact(menuExtra()));
 }
 
 function renderCtx() {
@@ -450,6 +467,11 @@ function renderCtx() {
     const n = selection.text.length;
     html += `<span class="chip">📎 <b>${esc(T.sel)}</b> ${n} zn.${selection.app ? ` · ${esc(selection.app.slice(0, 30))}` : ""}<button class="x" data-act="drop-sel">✕</button></span>`;
   }
+  pending.forEach((f, i) => {
+    const pic = f.image ? `<img class="thumb" src="${esc(fileSrc(f.path))}" alt="" />` : "📄";
+    html += `<span class="chip att" title="${esc(f.path)}">${pic}<span class="nm">${esc(f.name)}</span><button class="x" data-act="drop-att" data-i="${i}">✕</button></span>`;
+  });
+  if (shooting) html += `<span class="chip"><span class="spin"></span>${esc(T.shooting)}</span>`;
   if (conv.mode === "delegate") {
     const opts = (S.projects || []).map((p) => `<option value="${esc(p.path)}"${p.path === conv.cwd ? " selected" : ""}>${esc(p.name)}</option>`).join("");
     html += `<select id="proj"><option value="">${esc(T.no_project)}</option>${opts}<option value="__add__">${esc(T.add_project)}</option></select>`;
@@ -580,7 +602,7 @@ function sessionKey(engine) {
 }
 
 let keySeq = 0;
-async function startRun(engine, prompt, { resume = true, history = [], mode } = {}) {
+async function startRun(engine, prompt, { resume = true, history = [], mode, attachments = [] } = {}) {
   const a = { key: ++keySeq, conv: conv.id, engine, mode: mode || conv.mode, text: "", steps: [], status: "running", meta: "", model: modelFor(engine) ? modelName(engine) : "" };
   const prof = effectiveProfile();
   if (prof.key && engine !== "groq") a.meta = prof.name;
@@ -598,6 +620,7 @@ async function startRun(engine, prompt, { resume = true, history = [], mode } = 
         profile: prof.id,
         history,
         model: modelFor(engine) || null,
+        attachments: attachments.map((f) => f.path),
       },
     });
     a.run = run;
@@ -714,7 +737,25 @@ function buildPrompt(text) {
 
 async function send() {
   let text = $("#input").value;
-  if (!text.trim() && !selection) return;
+  if (!text.trim() && !selection && !pending.length) return;
+  if (shooting) return;
+  closeSlash();
+  // /screen <message>: a picture of the screen goes with the message
+  const shot = text.match(/^\s*\/(screen|obrazovka|snimek|snímek)\b\s*([\s\S]*)$/i);
+  if (shot) {
+    shooting = true;
+    renderChrome();
+    try {
+      const pic = await invoke("ask_screenshot", { embedded: EMBED });
+      if (pic) pending.push(pic);
+    } catch (e) {
+      shooting = false;
+      conv.items.push({ type: "answer", key: ++keySeq, engine: "whiskr", text: "", steps: [], status: "error", error: String(e) });
+      setExpanded(true);
+      return render();
+    }
+    shooting = false;
+  }
   // @model prefix
   const m = text.match(/^\s*@(gpt|codex|claude|cursor|groq)\b\s*/i);
   if (m) {
@@ -723,11 +764,19 @@ async function send() {
     text = text.slice(m[0].length);
   }
   // Slash commands: /brief <who>, /úkol <what>
-  const slash = text.match(/^\s*\/(brief|úkol|ukol|task)\b\s*([\s\S]*)$/i);
+  const slash = !shot && text.match(/^\s*\/(brief|úkol|ukol|task)\b\s*([\s\S]*)$/i);
   if (slash) return runSlash(slash[1].toLowerCase(), slash[2].trim());
-  const prompt = buildPrompt(text);
-  const user = { type: "user", text: text.trim() || "📎", ctx: !!selection, ctxApp: selection?.app };
-  if (!conv.title) conv.title = (text.trim() || selection?.text || "").slice(0, 70);
+  const shownText = text.trim();
+  if (shot) text = shot[2];
+  // saved actions: /přelož <text> → the action's instruction + the text
+  const act = findAction(text);
+  if (act) text = act.prompt.includes("{text}") ? act.prompt.replaceAll("{text}", act.rest) : act.rest ? `${act.prompt}\n\n${act.rest}` : act.prompt;
+  const files = pending.slice();
+  pending = [];
+  let prompt = buildPrompt(text);
+  if (!prompt.trim() && files.length) prompt = T.att_only;
+  const user = { type: "user", text: shownText || (files.length ? "" : "📎"), ctx: !!selection, ctxApp: selection?.app, files: files.length ? files : undefined };
+  if (!conv.title) conv.title = (shownText || selection?.text || files[0]?.name || "").slice(0, 70);
   selection = null;
   $("#input").value = "";
   autosize();
@@ -743,7 +792,7 @@ async function send() {
     const pair = { type: "pair", round: 1, question: prompt, a: placeholder(ea), b: placeholder(eb) };
     conv.items.push(pair);
     render();
-    [pair.a, pair.b] = await Promise.all([startRun(ea, prompt, { resume: false }), startRun(eb, prompt, { resume: false })]);
+    [pair.a, pair.b] = await Promise.all([startRun(ea, prompt, { resume: false, attachments: files }), startRun(eb, prompt, { resume: false, attachments: files })]);
   } else if (conv.mode === "delegate") {
     if (!conv.cwd) {
       conv.items.push({ type: "answer", key: ++keySeq, engine: conv.engine, text: "", steps: [], status: "error", error: T.no_project });
@@ -753,14 +802,14 @@ async function send() {
     const slot = { type: "answer", key: ++keySeq, engine: conv.engine, text: "", steps: [], status: "running", mode: "delegate" };
     conv.items.push(slot);
     render();
-    replaceAnswer(slot, await startRun(conv.engine, prompt));
+    replaceAnswer(slot, await startRun(conv.engine, prompt, { attachments: files }));
   } else {
     if (!available(conv.engine)) conv.engine = firstAvailable() || conv.engine;
     const history = conv.engine === "groq" ? historyPairs() : [];
     const slot = { type: "answer", key: ++keySeq, engine: conv.engine, text: "", steps: [], status: "running" };
     conv.items.push(slot);
     render();
-    const a = await startRun(conv.engine, prompt, { history });
+    const a = await startRun(conv.engine, prompt, { history, attachments: files });
     replaceAnswer(slot, a);
   }
   render();
@@ -860,7 +909,7 @@ function persist(c) {
   const i = convs.findIndex((x) => x.id === c.id);
   if (i >= 0) convs.splice(i, 1);
   convs.unshift(c);
-  convs = convs.slice(0, 80);
+  convs = convs.slice(0, 250);
   renderSide();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => invoke("ask_store_set", { data: JSON.stringify({ convs: convs.map(slim) }) }).catch(() => {}), 300);
@@ -901,7 +950,21 @@ function renderSideInner() {
   const q = $("#side-search").value.trim().toLowerCase();
   let list = convs.slice();
   if (conv.items.length && !list.includes(conv)) list.unshift(conv);
-  if (q) list = list.filter((c) => (c.title || "").toLowerCase().includes(q) || c.items.some((it) => it.type === "user" && (it.text || "").toLowerCase().includes(q)));
+  const hits = new Map(); // conv → snippet around the match
+  if (q) {
+    const words = norm(q).split(/\s+/).filter(Boolean);
+    list = list.filter((c) => {
+      const texts = convTexts(c);
+      const all = norm(texts.join("\n"));
+      if (!words.every((w) => all.includes(w))) return false;
+      if (!norm(c.title).includes(words[0])) {
+        const t = texts.find((x) => norm(x).includes(words[0])) || "";
+        const i = norm(t).indexOf(words[0]);
+        if (i >= 0) hits.set(c, (i > 30 ? "…" : "") + t.slice(Math.max(0, i - 30), i + 60).replace(/\s+/g, " ").trim());
+      }
+      return true;
+    });
+  }
   if (!list.length) return (box.innerHTML = `<div class="side-empty">${esc(q ? "—" : T.hist_empty)}</div>`);
   const now = new Date();
   const day0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -913,10 +976,24 @@ function renderSideInner() {
     if (g !== last) (html += `<div class="side-g">${esc(T[g])}</div>`), (last = g);
     const busy = [...runs.values()].some((a) => a.conv === c.id);
     html += `<button class="side-item${c === conv ? " on" : ""}" data-conv="${esc(c.id)}" title="${esc(c.title || "")}">
-      <span class="ic">${MODE_ICON[c.mode] || MODE_ICON.ask}</span><span class="t">${esc(c.title || "…")}</span>${busy ? '<span class="busy"></span>' : ""}
+      <span class="ic">${MODE_ICON[c.mode] || MODE_ICON.ask}</span><span class="t">${esc(c.title || "…")}${hits.has(c) ? `<small class="snip">${esc(hits.get(c))}</small>` : ""}</span>${busy ? '<span class="busy"></span>' : ""}
       <span class="del" data-del="${esc(c.id)}" title="${esc(T.del)}"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></span></button>`;
   }
   box.innerHTML = html;
+}
+// everything searchable in a chat: title, questions, answers, attached file names
+function convTexts(c) {
+  const out = [c.title || ""];
+  const ans = (a) => a && a.text && out.push(a.text);
+  for (const it of c.items) {
+    if (it.type === "user") {
+      out.push(it.text || "");
+      for (const f of it.files || []) out.push(f.name);
+    } else if (it.type === "answer") ans(it);
+    else if (it.type === "pair") (ans(it.a), ans(it.b));
+    else if (it.type === "synth") ans(it.a);
+  }
+  return out;
 }
 function saveStore() {
   clearTimeout(saveTimer);
@@ -950,6 +1027,7 @@ async function loadSettings() {
   $("#side-set-label").textContent = T.settings;
   $("#app-btn").title = T.open_app + " (Ctrl+,)";
   $("#side-search").placeholder = T.search;
+  $("#attach-btn").title = T.attach;
   $("#pin-btn").title = T.pin;
   $("#profile").title = T.profile_t;
 }
@@ -970,13 +1048,150 @@ async function loadTools(refresh = false) {
 
 // ───────── events ─────────
 const input = $("#input");
-input.addEventListener("input", autosize);
+input.addEventListener("input", () => {
+  autosize();
+  updateSlash();
+});
 input.addEventListener("keydown", (e) => {
+  if (slashOpen()) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      slashSel = (slashSel + (e.key === "ArrowDown" ? 1 : -1) + slashItems.length) % slashItems.length;
+      return renderSlash();
+    }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.ctrlKey)) {
+      e.preventDefault();
+      return pickSlash(slashItems[slashSel]);
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      return closeSlash();
+    }
+  }
   if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey) {
     e.preventDefault();
     send();
   }
 });
+
+// ───────── /commands: built-ins + saved actions ─────────
+const norm = (x) => (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function slashList() {
+  const builtin = [
+    { name: "screen", desc: T.sl_screen },
+    { name: "brief", desc: T.sl_brief },
+    { name: S.ui_lang === "en" ? "task" : "úkol", desc: T.sl_task },
+  ];
+  const acts = (S.ask_actions || []).filter((a) => a.name?.trim()).map((a) => ({ name: a.name.trim().replace(/^\//, ""), desc: a.prompt }));
+  return [...builtin, ...acts];
+}
+function findAction(text) {
+  const m = text.match(/^\s*\/(\S+)\s*([\s\S]*)$/);
+  if (!m) return null;
+  const a = (S.ask_actions || []).find((x) => x.name?.trim() && norm(x.name.trim().replace(/^\//, "")) === norm(m[1]));
+  return a ? { prompt: a.prompt || "", rest: m[2].trim() } : null;
+}
+let slashItems = [];
+let slashSel = 0;
+const slashOpen = () => !$("#slash-menu").hidden && slashItems.length > 0;
+function updateSlash() {
+  const m = input.value.match(/^\/(\S*)$/);
+  if (!m) return closeSlash();
+  const q = norm(m[1]);
+  slashItems = slashList().filter((c) => norm(c.name).startsWith(q) || (q.length > 1 && norm(c.name).includes(q)));
+  if (!slashItems.length) return closeSlash();
+  slashSel = Math.min(slashSel, slashItems.length - 1);
+  $("#engine-menu").hidden = true;
+  $("#slash-menu").hidden = false;
+  renderSlash();
+}
+function renderSlash() {
+  $("#slash-menu").innerHTML = slashItems
+    .map((c, i) => `<button class="sl${i === slashSel ? " on" : ""}" data-i="${i}"><b>/${esc(c.name)}</b><small>${esc((c.desc || "").slice(0, 70))}</small></button>`)
+    .join("");
+  $("#slash-menu .on")?.scrollIntoView({ block: "nearest" });
+  requestAnimationFrame(() => fitCompact(menuExtra()));
+}
+function closeSlash() {
+  if ($("#slash-menu").hidden) return;
+  $("#slash-menu").hidden = true;
+  slashItems = [];
+  slashSel = 0;
+  requestAnimationFrame(() => fitCompact(menuExtra()));
+}
+function pickSlash(c) {
+  if (!c) return;
+  input.value = `/${c.name} `;
+  closeSlash();
+  autosize();
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+$("#slash-menu").addEventListener("mousedown", (e) => {
+  const b = e.target.closest("[data-i]");
+  if (!b) return;
+  e.preventDefault();
+  pickSlash(slashItems[Number(b.dataset.i)]);
+});
+function menuExtra() {
+  const m = !$("#slash-menu").hidden ? $("#slash-menu") : !$("#engine-menu").hidden ? $("#engine-menu") : null;
+  return m ? Math.min(m.scrollHeight, 380) + 10 : 0;
+}
+
+// ───────── attachments: drop, paste, pick ─────────
+async function addPaths(paths) {
+  if (!paths?.length) return;
+  try {
+    pending.push(...((await invoke("ask_attach_paths", { paths })) || []));
+  } catch (e) {
+    flashError(String(e));
+  }
+  renderChrome();
+  input.focus();
+}
+function flashError(msg) {
+  conv.items.push({ type: "answer", key: ++keySeq, engine: "whiskr", text: "", steps: [], status: "error", error: msg });
+  setExpanded(true);
+  render();
+}
+const readAsDataUrl = (f) =>
+  new Promise((ok, no) => {
+    const r = new FileReader();
+    r.onload = () => ok(r.result);
+    r.onerror = () => no(r.error);
+    r.readAsDataURL(f);
+  });
+input.addEventListener("paste", async (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files.slice(0, 10)) {
+    try {
+      const name = f.name && f.name !== "image.png" ? f.name : `vlozeny-obrazek.${(f.type.split("/")[1] || "png").replace("jpeg", "jpg")}`;
+      const f2 = await invoke("ask_attach_data", { name, data: await readAsDataUrl(f) });
+      if (f2) pending.push(f2);
+    } catch (err) {
+      flashError(String(err));
+    }
+  }
+  renderChrome();
+});
+$("#attach-btn").addEventListener("click", async () => {
+  dialogOpen = true;
+  const paths = await invoke("pick_files").catch(() => []);
+  dialogOpen = false;
+  await addPaths(paths);
+});
+try {
+  TAURI?.webview?.getCurrentWebview?.().onDragDropEvent((ev) => {
+    const p = ev.payload || {};
+    const panel = $("#panel");
+    if (p.type === "enter" || p.type === "over") panel.classList.add("dropping");
+    else panel.classList.remove("dropping");
+    if (p.type === "drop") addPaths(p.paths || []);
+  });
+} catch {}
 document.addEventListener("click", (e) => {
   if (openMenuFor != null && !e.target.closest(".mact")) {
     openMenuFor = null;
@@ -1065,6 +1280,7 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     e.preventDefault();
+    if (slashOpen()) return closeSlash();
     if (!$("#engine-menu").hidden) return closeMenu();
     hide("Esc");
   } else if (e.ctrlKey && e.key === "Enter") {
@@ -1080,6 +1296,11 @@ document.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && (e.key === "h" || e.key === "H" || e.key === "b" || e.key === "B")) {
     e.preventDefault();
     toggleSide();
+  } else if (e.ctrlKey && (e.key === "f" || e.key === "F" || e.key === "k" || e.key === "K") && !EMBED) {
+    e.preventDefault();
+    if (!sideOpen) toggleSide();
+    $("#side-search").focus();
+    $("#side-search").select();
   }
 });
 
@@ -1248,6 +1469,7 @@ function renderMenu() {
     .join("");
 }
 $("#engine").addEventListener("click", async () => {
+  closeSlash();
   const menu = $("#engine-menu");
   if (!menu.hidden) return closeMenu();
   menu.hidden = false;
@@ -1279,6 +1501,7 @@ $("#ctx").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
   if (b.dataset.act === "drop-sel") selection = null;
+  if (b.dataset.act === "drop-att") pending.splice(Number(b.dataset.i), 1);
   if (b.dataset.act === "access") await saveSettings({ ask_access: S.ask_access === "full" ? "safe" : "full" });
   renderChrome();
   input.focus();
@@ -1322,6 +1545,7 @@ $("#thread").addEventListener("click", async (e) => {
   }
   if (openMenuFor != null && act !== "more") openMenuFor = null;
   if (act === "img") return invoke("open_image", { path: b.dataset.path }).catch(() => {});
+  if (act === "file") return invoke("open_attachment", { path: b.dataset.path }).catch(() => {});
   if (act === "debate-more") return debateMore();
   if (act === "debate-sum") return debateSum();
   const a = findAnswer(b.closest("[data-ans]")?.dataset.ans);
@@ -1380,6 +1604,7 @@ listen("whiskr:ask-hidden", () => {
   layoutSeq++;
   compactH = 0;
   closeMenu();
+  closeSlash();
   const panel = $("#panel");
   panel.classList.remove("enter", "leave");
   clearGrow(panel);
@@ -1499,7 +1724,7 @@ listen("whiskr:ask-open", async (ev) => {
 listen("whiskr:ask-blur", () => {
   // A started chat stays put when you click elsewhere; only the empty bar hides.
   setTimeout(() => {
-    if (!shown || closing || pinned || dialogOpen || document.hasFocus()) return;
+    if (!shown || closing || pinned || dialogOpen || pending.length || document.hasFocus()) return;
     if ($("#shell").dataset.state === "expanded" || conv.items.length) return;
     hide("blur");
   }, 150);
@@ -1511,7 +1736,7 @@ listen("whiskr:tools", (ev) => {
 
 // keep the collapsed window exactly the size of the bar
 new ResizeObserver(() => {
-  if ($("#shell").dataset.state === "compact") fitCompact($("#engine-menu").hidden ? 0 : $("#engine-menu").offsetHeight + 10);
+  if ($("#shell").dataset.state === "compact") fitCompact(menuExtra());
 }).observe($("#composer"));
 
 // ───────── boot ─────────
@@ -1542,6 +1767,7 @@ function mockApi() {
   const fire = (name, payload) => (handlers[name] || []).forEach((h) => h({ payload }));
   let settings = {
     ui_lang: "cs", ask_engine: "claude", ask_access: "safe", active_profile: "personal", ask_typewriter: true, ask_models: { claude: "opus" },
+    ask_actions: [{ name: "přelož", prompt: "Přelož text do angličtiny. Vrať jen překlad." }, { name: "oprav", prompt: "Oprav gramatiku: {text}" }],
     profiles: [{ id: "personal", name: "Osobní", key: "" }, { id: "work", name: "Práce", key: "work" }],
     projects: [{ name: "iris", path: "C:\\Users\\user\\code\\iris", profile: "personal" }, { name: "acme-web", path: "C:\\Users\\user\\work\\acme", profile: "work" }],
   };
@@ -1566,7 +1792,9 @@ function mockApi() {
           const mk = (title, mode, ago) => ({ id: "c" + ago, title, mode, engine: "claude", cwd: "", sessions: {}, updated: Date.now() - ago * 36e5, items: [{ type: "user", text: title }] });
           return JSON.stringify({ convs: [mk("Jak napojit e-maily Acme na chatbota", "ask", 1), mk("Claude × GPT: lokální AI pro Vojtu", "debate", 3), mk("Přidej README do iris", "delegate", 26), mk("Prompt pro onboarding v AI Laboratoři", "ask", 50), mk("Rozpočet Jana — kontrola", "ask", 200)] });
         }
+        case "ask_screenshot": return { name: "obrazovka.png", path: "icons/whiskr.png", image: true, size: 1000 };
         case "ask_run": {
+          window.__lastReq = args.req;
           const run = seq++;
           const { engine, mode } = args.req;
           const text = answers[engine] || "OK";

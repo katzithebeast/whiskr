@@ -1,6 +1,6 @@
 [package]
 name = "whiskr"
-version = "0.16.13"
+version = "0.17.0"
 description = "Whiskr — speak, Whiskr does the rest."
 authors = ["Filip Kubeš"]
 edition = "2021"
@@ -34,6 +34,7 @@ dirs = "5"
 tract-onnx = "0.21"
 rustfft = "6"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+png = "0.17"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

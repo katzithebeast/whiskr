@@ -107,6 +107,12 @@ pub struct Settings {
     pub ask_selection_copy: bool,
     /// Write a diagnostic log next to Whiskr.exe (for troubleshooting only).
     pub debug_log: bool,
+    /// Ask: "who I am / how to answer me" — sent with every chat.
+    pub ask_instructions: String,
+    /// Ask: saved prompts, called with /name in the chat bar.
+    pub ask_actions: Vec<AskAction>,
+    /// Ask: the agents may look into Whiskr's own data (dictations, meetings).
+    pub ask_whiskr_data: bool,
     /// Intro animation when the main window opens.
     pub splash: bool,
     /// Picture behind the home page hero: "" = built-in mountains, "none", or a file path.
@@ -175,6 +181,9 @@ impl Default for Settings {
             game_apps: vec!["league of legends.exe".into()],
             ask_selection_copy: false,
             debug_log: false,
+            ask_instructions: String::new(),
+            ask_actions: default_actions(),
+            ask_whiskr_data: true,
             look: Look::default(),
             splash: true,
             home_bg: String::new(),
@@ -182,6 +191,27 @@ impl Default for Settings {
             schema: CURRENT_SCHEMA,
         }
     }
+}
+
+/// A saved prompt for the chat bar: "/přelož ahoj světe".
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(default)]
+pub struct AskAction {
+    /// What you type after the slash (e.g. "přelož").
+    pub name: String,
+    /// The instruction. {text} = what you wrote after the command (else it goes after).
+    pub prompt: String,
+}
+
+pub fn default_actions() -> Vec<AskAction> {
+    let a = |n: &str, p: &str| AskAction { name: n.into(), prompt: p.into() };
+    vec![
+        a("přelož", "Přelož text do angličtiny (když už je anglicky, tak do češtiny). Vrať jen překlad."),
+        a("oprav", "Oprav gramatiku, překlepy a stylistiku. Zachovej význam, tón i formátování. Vrať jen opravený text."),
+        a("email", "Napiš z toho krátký, přirozený e-mail. Vrať jen text e-mailu, bez komentářů."),
+        a("shrň", "Shrň to v několika krátkých bodech."),
+        a("vysvětli", "Vysvětli to jednoduše a srozumitelně, s příkladem."),
+    ]
 }
 
 const CURRENT_SCHEMA: u32 = 1;

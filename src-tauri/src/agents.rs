@@ -384,7 +384,7 @@ pub fn build_with(tool: &Tool, args: &[&str], profile_key: &str, cwd: Option<&st
 
 // ───────────────────────────── runs ─────────────────────────────
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Clone, Debug, Default)]
 pub struct RunReq {
     pub engine: String,
     /// "ask" | "delegate"
@@ -406,6 +406,99 @@ pub struct RunReq {
     /// Quick answers: no MCP servers for Claude, low reasoning for Codex.
     #[serde(default)]
     pub fast: bool,
+    /// Files attached to this message (Windows paths).
+    #[serde(default)]
+    pub attachments: Vec<String>,
+    /// The user's standing instructions ("who I am, how to answer").
+    #[serde(default)]
+    pub instructions: String,
+    /// whiskr-mcp.exe (Windows path): lets the agent read the user's own
+    /// dictations and meetings.
+    #[serde(default)]
+    pub whiskr_mcp: Option<String>,
+}
+
+const WHISKR_HINT: &str = "The user's own Whiskr data — their dictations and recorded meetings and calls (summaries, decisions, tasks, transcripts) — is available through the `whiskr` tools. Use them whenever a question is about what the user said, dictated, discussed or agreed in a meeting.";
+
+pub fn is_image(path: &str) -> bool {
+    let l = path.to_lowercase();
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"].iter().any(|e| l.ends_with(e))
+}
+
+/// A Windows path as the tool sees it: in WSL "C:\x\y" is "/mnt/c/x/y".
+pub fn path_for(p: &str, runtime: &str) -> String {
+    if runtime != "wsl" {
+        return p.to_string();
+    }
+    let b = p.as_bytes();
+    if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/') {
+        return format!("/mnt/{}/{}", (b[0] as char).to_ascii_lowercase(), p[3..].replace('\\', "/"));
+    }
+    p.replace('\\', "/")
+}
+
+fn has_extra_system(req: &RunReq) -> bool {
+    !req.instructions.trim().is_empty() || req.whiskr_mcp.is_some()
+}
+
+/// Claude's system prompt add-on: ask mode's own rules + the user's instructions + the Whiskr data hint.
+fn claude_system(req: &RunReq, ask: bool) -> String {
+    let mut s = String::new();
+    if ask {
+        s.push_str(ASK_SYSTEM);
+    }
+    if req.whiskr_mcp.is_some() {
+        if !s.is_empty() {
+            s.push_str("\n\n");
+        }
+        s.push_str(WHISKR_HINT);
+    }
+    if !req.instructions.trim().is_empty() {
+        if !s.is_empty() {
+            s.push_str("\n\n");
+        }
+        s.push_str("The user's standing instructions (follow them):\n");
+        s.push_str(req.instructions.trim());
+    }
+    s
+}
+
+/// Final prompt: instructions for tools without a system prompt flag (first
+/// message of a session only) + the message + where the attached files are.
+pub fn prepare(req: &mut RunReq, runtime: &str) {
+    let mut pre = String::new();
+    if req.engine != "claude" && req.resume.is_none() {
+        if !req.instructions.trim().is_empty() {
+            pre.push_str(&format!("<pokyny_uzivatele>\n{}\n</pokyny_uzivatele>\n\n", req.instructions.trim()));
+        }
+        if req.whiskr_mcp.is_some() && req.engine == "codex" {
+            pre.push_str(&format!("({WHISKR_HINT})\n\n"));
+        }
+    }
+    let mut post = String::new();
+    if !req.attachments.is_empty() {
+        post.push_str("\n\nPřiložené soubory (jsou na disku — otevři si je, obrázky si prohlédni):");
+        for a in &req.attachments {
+            post.push_str("\n- ");
+            post.push_str(&path_for(a, runtime));
+        }
+    }
+    if !pre.is_empty() || !post.is_empty() {
+        req.prompt = format!("{pre}{}{post}", req.prompt);
+    }
+}
+
+fn attach_dirs(req: &RunReq, runtime: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec![];
+    for a in &req.attachments {
+        if let Some((d, _)) = a.rsplit_once(['\\', '/']) {
+            let d = path_for(d, runtime);
+            if !v.contains(&d) {
+                v.push(d);
+            }
+        }
+    }
+    v
 }
 
 const ASK_SYSTEM: &str = "You are answering from the Whiskr quick-ask window. Be concise, concrete and practical. Answer in the language the user writes in. Use short Markdown (lists, code blocks) only when it helps.";
@@ -425,17 +518,45 @@ pub fn args_for(req: &RunReq, runtime: &str) -> Vec<String> {
             if let Some(id) = &req.resume {
                 a.extend([s("--resume"), id.clone()]);
             }
+            // (--mcp-config, --add-dir and --allowedTools take several values:
+            // each is always followed by another --flag)
+            if let Some(exe) = &req.whiskr_mcp {
+                let cfg = serde_json::json!({ "mcpServers": { "whiskr": { "command": path_for(exe, runtime) } } });
+                a.extend([s("--mcp-config"), cfg.to_string()]);
+            }
+            let reads = !req.attachments.is_empty();
             if ask {
                 if req.fast {
                     // don't start every MCP server / connector for a quick question
+                    // (only Whiskr's own, if it was given above)
                     a.push(s("--strict-mcp-config"));
                 }
-                a.extend(["--tools", "WebSearch,WebFetch", "--allowedTools", "WebSearch,WebFetch"].map(s));
-                a.extend([s("--append-system-prompt"), s(ASK_SYSTEM)]);
-            } else if full {
-                a.extend(["--permission-mode", "bypassPermissions"].map(s));
+                let mut tools = s("WebSearch,WebFetch");
+                if reads {
+                    tools.push_str(",Read");
+                }
+                let mut allowed = tools.clone();
+                if req.whiskr_mcp.is_some() {
+                    allowed.push_str(",mcp__whiskr");
+                }
+                a.extend([s("--tools"), tools, s("--allowedTools"), allowed]);
+                a.extend([s("--append-system-prompt"), claude_system(req, true)]);
             } else {
-                a.extend(["--permission-mode", "acceptEdits"].map(s));
+                if reads {
+                    a.push(s("--add-dir"));
+                    a.extend(attach_dirs(req, runtime));
+                }
+                if req.whiskr_mcp.is_some() {
+                    a.extend(["--allowedTools", "mcp__whiskr"].map(s));
+                }
+                if has_extra_system(req) {
+                    a.extend([s("--append-system-prompt"), claude_system(req, false)]);
+                }
+                if full {
+                    a.extend(["--permission-mode", "bypassPermissions"].map(s));
+                } else {
+                    a.extend(["--permission-mode", "acceptEdits"].map(s));
+                }
             }
         }
         "codex" => {
@@ -443,9 +564,20 @@ pub fn args_for(req: &RunReq, runtime: &str) -> Vec<String> {
             if let Some(id) = &req.resume {
                 a.extend([s("resume"), id.clone()]);
             }
+            if req.resume.is_none() {
+                // pictures straight to the first message (later ones: the agent
+                // opens the files itself — the paths are in the prompt)
+                for p in req.attachments.iter().filter(|p| is_image(p)) {
+                    a.extend([s("-i"), path_for(p, runtime)]);
+                }
+            }
             a.extend(["--json", "--skip-git-repo-check"].map(s));
             if !req.model.is_empty() {
                 a.extend([s("-m"), req.model.clone()]);
+            }
+            if let Some(exe) = &req.whiskr_mcp {
+                // TOML literal string: backslashes stay as they are
+                a.extend([s("-c"), format!("mcp_servers.whiskr.command='{}'", path_for(exe, runtime).replace('\'', ""))]);
             }
             if ask {
                 a.extend(["-c", "sandbox_mode=read-only"].map(s));
@@ -691,7 +823,8 @@ fn running() -> &'static Mutex<HashMap<u64, Running>> {
 }
 
 /// Start a run in the background; `emit` gets every event (and a final Done/Error).
-pub fn start(id: u64, tool: &Tool, req: RunReq, ask_dir: &std::path::Path, emit: impl Fn(Ev) + Send + Sync + 'static) -> Result<(), String> {
+pub fn start(id: u64, tool: &Tool, mut req: RunReq, ask_dir: &std::path::Path, emit: impl Fn(Ev) + Send + Sync + 'static) -> Result<(), String> {
+    prepare(&mut req, &tool.runtime);
     let args = args_for(&req, &tool.runtime);
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let ask_dir_s = ask_dir.to_string_lossy().to_string();
@@ -968,7 +1101,7 @@ mod tests {
 
     #[test]
     fn args_never_carry_prompt_for_stdin_engines() {
-        let req = RunReq { engine: "codex".into(), mode: "ask".into(), prompt: "tajné \"uvozovky\"".into(), cwd: None, resume: Some("t1".into()), profile_key: String::new(), access: String::new(), model: String::new(), fast: false };
+        let req = RunReq { engine: "codex".into(), mode: "ask".into(), prompt: "tajné \"uvozovky\"".into(), cwd: None, resume: Some("t1".into()), profile_key: String::new(), access: String::new(), model: String::new(), fast: false, ..Default::default() };
         let a = args_for(&req, "windows");
         assert_eq!(&a[..3], &["exec", "resume", "t1"]);
         assert!(!a.iter().any(|x| x.contains("tajné")));
@@ -1084,9 +1217,50 @@ mod model_tests {
 
     #[test]
     fn model_flags() {
-        let mut r = RunReq { engine: "claude".into(), mode: "ask".into(), prompt: "x".into(), cwd: None, resume: None, profile_key: String::new(), access: String::new(), model: "opus".into(), fast: true };
+        let mut r = RunReq { engine: "claude".into(), mode: "ask".into(), prompt: "x".into(), cwd: None, resume: None, profile_key: String::new(), access: String::new(), model: "opus".into(), fast: true, ..Default::default() };
         assert!(args_for(&r, "windows").windows(2).any(|w| w[0] == "--model" && w[1] == "opus"));
         r.engine = "codex".into();
         assert!(args_for(&r, "windows").windows(2).any(|w| w[0] == "-m" && w[1] == "opus"));
+    }
+
+    #[test]
+    fn attachments_instructions_mcp() {
+        assert_eq!(path_for(r"C:\Users\A b\x.png", "wsl"), "/mnt/c/Users/A b/x.png");
+        assert_eq!(path_for(r"C:\x.png", "windows"), r"C:\x.png");
+        let mut r = RunReq {
+            engine: "claude".into(),
+            mode: "ask".into(),
+            prompt: "co to je".into(),
+            attachments: vec![r"C:\w\attachments\a.png".into()],
+            instructions: "Jsem Filip".into(),
+            whiskr_mcp: Some(r"C:\m\whiskr-mcp.exe".into()),
+            fast: true,
+            ..Default::default()
+        };
+        prepare(&mut r, "wsl");
+        assert!(r.prompt.starts_with("co to je\n\nPřiložené"), "{}", r.prompt);
+        assert!(r.prompt.ends_with("/mnt/c/w/attachments/a.png"));
+        let a = args_for(&r, "wsl");
+        let i = a.iter().position(|x| x == "--mcp-config").unwrap();
+        assert!(a[i + 1].contains("/mnt/c/m/whiskr-mcp.exe"));
+        assert!(a[i + 2].starts_with("--"));
+        let t = a.iter().position(|x| x == "--allowedTools").unwrap();
+        assert_eq!(a[t + 1], "WebSearch,WebFetch,Read,mcp__whiskr");
+        let sp = a.iter().position(|x| x == "--append-system-prompt").unwrap();
+        assert!(a[sp + 1].contains("Jsem Filip") && a[sp + 1].contains("whiskr"));
+        // codex: instructions go in the first message, the picture with -i
+        let mut c = RunReq { engine: "codex".into(), mode: "ask".into(), prompt: "q".into(), attachments: vec![r"C:\w\b.jpg".into()], instructions: "Jsem Filip".into(), whiskr_mcp: Some(r"C:\m\whiskr-mcp.exe".into()), ..Default::default() };
+        prepare(&mut c, "windows");
+        assert!(c.prompt.starts_with("<pokyny_uzivatele>"));
+        let a = args_for(&c, "windows");
+        assert_eq!(&a[1..3], &["-i".to_string(), r"C:\w\b.jpg".to_string()]);
+        assert!(a.contains(&r"mcp_servers.whiskr.command='C:\m\whiskr-mcp.exe'".to_string()));
+        // delegate: --add-dir followed by a flag
+        let mut d = RunReq { engine: "claude".into(), mode: "delegate".into(), prompt: "q".into(), attachments: vec![r"C:\w\b.jpg".into()], ..Default::default() };
+        prepare(&mut d, "windows");
+        let a = args_for(&d, "windows");
+        let i = a.iter().position(|x| x == "--add-dir").unwrap();
+        assert_eq!(a[i + 1], r"C:\w");
+        assert!(a[i + 2].starts_with("--"));
     }
 }

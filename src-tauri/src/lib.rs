@@ -2,6 +2,8 @@
 mod dlog;
 mod groq;
 mod selection;
+#[cfg(windows)]
+mod screen;
 mod updater;
 mod history;
 mod meeting;
@@ -1708,6 +1710,9 @@ struct AskRunArgs {
     history: Vec<(String, String)>,
     #[serde(default)]
     model: Option<String>,
+    /// Attached files (Windows paths, inside ask-workspace/attachments).
+    #[serde(default)]
+    attachments: Vec<String>,
 }
 
 // async = runs off the UI thread: starting WSL/Codex can take seconds and used
@@ -1744,6 +1749,10 @@ async fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
         if key.trim().is_empty() {
             return Err("Chybí Groq klíč".into());
         }
+        if req.attachments.iter().any(|p| agents::is_image(p)) {
+            return Err("Groq obrázky neumí — přepni na Claude nebo GPT.".into());
+        }
+        let instructions = state.settings.lock().ask_instructions.trim().to_string();
         let http = state.http.clone();
         tauri::async_runtime::spawn(async move {
             let mut user = String::new();
@@ -1751,7 +1760,23 @@ async fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
                 user.push_str(&format!("User: {q}\nAssistant: {a}\n\n"));
             }
             user.push_str(&req.prompt);
-            let system = "You are Whiskr's quick assistant. Be concise, concrete and practical. Answer in the language the user writes in. Use short Markdown only when it helps.";
+            // text files go in whole (Groq can't open files)
+            for p in &req.attachments {
+                let name = std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                match std::fs::read(p) {
+                    Ok(b) if std::str::from_utf8(&b).is_ok() => {
+                        let t: String = String::from_utf8_lossy(&b).chars().take(60_000).collect();
+                        user.push_str(&format!("\n\n<soubor nazev=\"{name}\">\n{t}\n</soubor>"));
+                    }
+                    _ => user.push_str(&format!("\n\n(Soubor {name} nejde přečíst jako text.)")),
+                }
+            }
+            let mut system = String::from("You are Whiskr's quick assistant. Be concise, concrete and practical. Answer in the language the user writes in. Use short Markdown only when it helps.");
+            if !instructions.is_empty() {
+                system.push_str("\n\nThe user's standing instructions (follow them):\n");
+                system.push_str(&instructions);
+            }
+            let system = system.as_str();
             match groq::chat_text_with(&http, &key, system, &user, req.model.as_deref()).await {
                 Ok(t) => {
                     emit(agents::Ev::Text { text: t });
@@ -1771,8 +1796,28 @@ async fn ask_run(app: AppHandle, req: AskRunArgs) -> Result<u64, String> {
         })?;
         (tool, profile_key(&s, req.profile.as_deref()), s.ask_access.clone())
     };
-    let fast = state.settings.lock().ask_fast;
-    let run = agents::RunReq { engine: req.engine, mode: req.mode, prompt: req.prompt, cwd: req.cwd, resume: req.resume, profile_key: pkey, access, model: req.model.unwrap_or_default(), fast };
+    let (fast, instructions, data) = {
+        let s = state.settings.lock();
+        (s.ask_fast, s.ask_instructions.clone(), s.ask_whiskr_data)
+    };
+    // Whiskr's own dictations & meetings, for Claude Code and Codex (Cursor
+    // only reads its own MCP config)
+    let mcp = mcp_exe();
+    let whiskr_mcp = (data && matches!(req.engine.as_str(), "claude" | "codex") && mcp.exists()).then(|| mcp.to_string_lossy().to_string());
+    let run = agents::RunReq {
+        engine: req.engine,
+        mode: req.mode,
+        prompt: req.prompt,
+        cwd: req.cwd,
+        resume: req.resume,
+        profile_key: pkey,
+        access,
+        model: req.model.unwrap_or_default(),
+        fast,
+        attachments: req.attachments,
+        instructions,
+        whiskr_mcp,
+    };
     agents::start(id, &tool, run, &state.data_dir.join("ask-workspace"), emit)?;
     Ok(id)
 }
@@ -2028,6 +2073,17 @@ fn open_image(app: AppHandle, path: String) -> Result<(), String> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Open a file attached in the chat (only from the attachments folder).
+#[tauri::command]
+fn open_attachment(app: AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let p = std::path::Path::new(&path);
+    if !p.is_file() || !p.starts_with(attach_dir(&app)) {
+        return Err("Soubor nenalezen".into());
+    }
+    app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
+}
+
 /// Diagnostic line from a page (goes to whiskr-debug.log).
 #[tauri::command]
 async fn dbg_log(window: tauri::WebviewWindow, msg: String) {
@@ -2219,6 +2275,176 @@ fn ask_store_get(state: State<'_, AppState>) -> String {
 fn ask_store_set(state: State<'_, AppState>, data: String) -> Result<(), String> {
     let _ = std::fs::create_dir_all(&state.data_dir);
     std::fs::write(state.data_dir.join("ask.json"), data).map_err(|e| e.to_string())
+}
+
+// ───────── attachments in the chat ─────────
+
+#[derive(serde::Serialize)]
+struct Attachment {
+    name: String,
+    path: String,
+    image: bool,
+    size: u64,
+}
+
+fn attach_dir(app: &AppHandle) -> PathBuf {
+    app.state::<AppState>().data_dir.join("ask-workspace").join("attachments")
+}
+
+/// A free file name in the attachments folder ("2026-10-21_2301_screen.png").
+fn attach_target(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    let dir = attach_dir(app);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Přílohy: {e}"))?;
+    let clean: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' })
+        .collect::<String>()
+        .trim()
+        .chars()
+        .rev()
+        .take(80)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let clean = if clean.is_empty() { "soubor".to_string() } else { clean };
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let mut p = dir.join(format!("{stamp}_{clean}"));
+    let mut i = 2;
+    while p.exists() {
+        p = dir.join(format!("{stamp}-{i}_{clean}"));
+        i += 1;
+    }
+    Ok(p)
+}
+
+fn attachment(app: &AppHandle, p: &std::path::Path, name: &str) -> Attachment {
+    let _ = app.asset_protocol_scope().allow_file(p);
+    let path = p.to_string_lossy().to_string();
+    Attachment { name: name.to_string(), image: agents::is_image(&path), size: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0), path }
+}
+
+const ATTACH_MAX: u64 = 30 * 1024 * 1024;
+
+/// Files dropped on / picked for the chat: copied next to the chat's workspace
+/// (so the agent may open them and they stay with the conversation).
+#[tauri::command]
+async fn ask_attach_paths(app: AppHandle, paths: Vec<String>) -> Result<Vec<Attachment>, String> {
+    let mut out = vec![];
+    for src in paths.iter().take(10) {
+        let sp = std::path::Path::new(src);
+        let meta = std::fs::metadata(sp).map_err(|e| format!("{src}: {e}"))?;
+        if meta.is_dir() {
+            return Err("Složky přikládat nejde — vyber soubory.".into());
+        }
+        if meta.len() > ATTACH_MAX {
+            return Err(format!("{} je moc velký (max 30 MB).", sp.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+        }
+        let name = sp.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "soubor".into());
+        let dst = attach_target(&app, &name)?;
+        std::fs::copy(sp, &dst).map_err(|e| format!("{name}: {e}"))?;
+        out.push(attachment(&app, &dst, &name));
+    }
+    Ok(out)
+}
+
+/// A pasted picture / file (base64 from the page).
+#[tauri::command]
+async fn ask_attach_data(app: AppHandle, name: String, data: String) -> Result<Attachment, String> {
+    let bytes = b64_decode(&data).ok_or("Vložená data nejdou přečíst")?;
+    if bytes.len() as u64 > ATTACH_MAX {
+        return Err("Soubor je moc velký (max 30 MB).".into());
+    }
+    let dst = attach_target(&app, &name)?;
+    std::fs::write(&dst, &bytes).map_err(|e| format!("Přílohy: {e}"))?;
+    Ok(attachment(&app, &dst, &name))
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let s = s.split_once(',').map_or(s, |(h, d)| if h.contains("base64") { d } else { s });
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => (c - b'A') as u32,
+            b'a'..=b'z' => (c - b'a' + 26) as u32,
+            b'0'..=b'9' => (c - b'0' + 52) as u32,
+            b'+' | b'-' => 62,
+            b'/' | b'_' => 63,
+            _ => return None,
+        })
+    };
+    let clean: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace() && *c != b'=').collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            n |= val(*c)? << (18 - 6 * i);
+        }
+        out.push((n >> 16) as u8);
+        if chunk.len() > 2 {
+            out.push((n >> 8) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push(n as u8);
+        }
+    }
+    Some(out)
+}
+
+#[tauri::command]
+async fn pick_files(app: AppHandle) -> Vec<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_files(move |f| {
+        let _ = tx.send(f.map(|v| v.into_iter().map(|p| p.to_string()).collect::<Vec<_>>()));
+    });
+    rx.await.ok().flatten().unwrap_or_default()
+}
+
+/// /screen: a picture of the monitor you're on (the chat itself is hidden
+/// from it for that moment), saved as an attachment.
+#[tauri::command]
+async fn ask_screenshot(app: AppHandle, embedded: bool) -> Result<Attachment, String> {
+    #[cfg(windows)]
+    let (hwnd, hide) = if embedded {
+        (app.get_webview_window("main").and_then(|w| w.hwnd().ok()).map(|h| h.0 as isize).unwrap_or(0), false)
+    } else {
+        (ASK_HWND.load(AO::SeqCst), true)
+    };
+    #[cfg(not(windows))]
+    let (hwnd, hide) = (0isize, !embedded);
+    let shot = tauri::async_runtime::spawn_blocking(move || capture_screen_png(hwnd, hide)).await.map_err(|e| e.to_string())??;
+    let dst = attach_target(&app, "obrazovka.png")?;
+    std::fs::write(&dst, shot).map_err(|e| format!("Snímek: {e}"))?;
+    dlog!("ask_screenshot: {}", dst.display());
+    Ok(attachment(&app, &dst, "obrazovka.png"))
+}
+
+#[cfg(windows)]
+fn capture_screen_png(hwnd: isize, hide: bool) -> Result<Vec<u8>, String> {
+    if hide {
+        cloak_ask(true);
+    }
+    let r = screen::capture(hwnd);
+    if hide {
+        cloak_ask(false);
+    }
+    r
+}
+
+#[cfg(not(windows))]
+fn capture_screen_png(_hwnd: isize, _hide: bool) -> Result<Vec<u8>, String> {
+    Err("Snímek obrazovky zatím umím jen ve Windows.".into())
+}
+
+/// Attachments older than 60 days go (chats keep working, the pictures just disappear).
+fn prune_attachments(dir: PathBuf) {
+    let Ok(it) = std::fs::read_dir(&dir) else { return };
+    let old = std::time::SystemTime::now() - Duration::from_secs(60 * 24 * 3600);
+    for e in it.flatten() {
+        if e.metadata().and_then(|m| m.modified()).map_or(false, |t| t < old) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 #[tauri::command]
@@ -2562,6 +2788,10 @@ pub fn run() {
                 let bg = state.data_dir.join("backgrounds");
                 let _ = std::fs::create_dir_all(&bg);
                 let _ = handle.asset_protocol_scope().allow_directory(&bg, true);
+                let att = state.data_dir.join("ask-workspace").join("attachments");
+                let _ = std::fs::create_dir_all(&att);
+                let _ = handle.asset_protocol_scope().allow_directory(&att, true);
+                std::thread::spawn(move || prune_attachments(att));
             }
             std::thread::spawn(install_mcp);
             {
@@ -2752,6 +2982,11 @@ pub fn run() {
             ask_store_get,
             ask_store_set,
             pick_folder,
+            pick_files,
+            ask_attach_paths,
+            ask_attach_data,
+            ask_screenshot,
+            open_attachment,
             app_version,
             assistant::brain_status,
             assistant::brain_connectors,

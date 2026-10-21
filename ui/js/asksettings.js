@@ -7,6 +7,15 @@ const TOOLS = [
   { engine: "cursor", name: "Cursor Agent", sub: "Cursor", install: "curl https://cursor.com/install -fsS | bash" },
 ];
 
+// same as the core's defaults (settings.rs) — "Výchozí akce" adds the missing ones back
+const DEFAULT_ACTIONS = [
+  { name: "přelož", prompt: "Přelož text do angličtiny (když už je anglicky, tak do češtiny). Vrať jen překlad." },
+  { name: "oprav", prompt: "Oprav gramatiku, překlepy a stylistiku. Zachovej význam, tón i formátování. Vrať jen opravený text." },
+  { name: "email", prompt: "Napiš z toho krátký, přirozený e-mail. Vrať jen text e-mailu, bez komentářů." },
+  { name: "shrň", prompt: "Shrň to v několika krátkých bodech." },
+  { name: "vysvětli", prompt: "Vysvětli to jednoduše a srozumitelně, s příkladem." },
+];
+
 export function initAskSettings(ctx) {
   const { invoke, listen, toast, esc, $, $$, T, settings, save } = ctx;
   let info = { tools: [], groq: false };
@@ -95,7 +104,25 @@ export function initAskSettings(ctx) {
       .join("");
   }
 
+  function renderActions() {
+    const t = T();
+    const s = settings();
+    if ($("#ask-instr") && document.activeElement !== $("#ask-instr")) $("#ask-instr").value = s.ask_instructions || "";
+    if ($("#ask-wdata")) $("#ask-wdata").checked = s.ask_whiskr_data !== false;
+    const list = s.ask_actions || [];
+    $("#ask-actions").innerHTML = list
+      .map(
+        (a, i) => `<div class="act-item" data-i="${i}">
+          <div class="act-name"><span>/</span><input class="input input-sm" data-k="name" value="${esc(a.name)}" placeholder="${esc(t.ask_action_name)}" spellcheck="false" /></div>
+          <textarea class="input input-sm" data-k="prompt" rows="2" placeholder="${esc(t.ask_action_prompt)}">${esc(a.prompt)}</textarea>
+          <button class="btn btn-ghost btn-sm" data-del="${i}">${esc(t.tpl_delete)}</button>
+        </div>`
+      )
+      .join("");
+  }
+
   function render() {
+    renderActions();
     renderTools();
     renderSelects();
     renderProfiles();
@@ -188,6 +215,40 @@ export function initAskSettings(ctx) {
     const id = "p" + Date.now().toString(36);
     const list = [...profiles(), { id, name: "Klient", key: "client" + (profiles().length + 1) }];
     if (await save({ profiles: list }, true)) render();
+  });
+
+  // instructions & actions
+  $("#ask-instr")?.addEventListener("change", (e) => save({ ask_instructions: e.target.value.trim() }));
+  $("#ask-wdata")?.addEventListener("change", (e) => save({ ask_whiskr_data: e.target.checked }, true));
+  const actions = () => (settings().ask_actions || []).map((a) => ({ ...a }));
+  $("#ask-actions")?.addEventListener("change", async (e) => {
+    const f = e.target.closest("[data-k]");
+    if (!f) return;
+    const list = actions();
+    const i = Number(f.closest(".act-item").dataset.i);
+    let v = f.value.trim();
+    if (f.dataset.k === "name") v = v.replace(/^\/+/, "").replace(/\s+/g, "-");
+    list[i][f.dataset.k] = v;
+    await save({ ask_actions: list }, true);
+  });
+  $("#ask-actions")?.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-del]");
+    if (!b) return;
+    const list = actions().filter((_, i) => i !== Number(b.dataset.del));
+    if (await save({ ask_actions: list }, true)) renderActions();
+  });
+  $("#ask-action-add")?.addEventListener("click", async () => {
+    if (await save({ ask_actions: [...actions(), { name: "", prompt: "" }] }, true)) {
+      renderActions();
+      const items = $("#ask-actions").querySelectorAll(".act-item input");
+      items[items.length - 1]?.focus();
+    }
+  });
+  $("#ask-actions-reset")?.addEventListener("click", async () => {
+    const mine = actions().filter((a) => a.name);
+    const have = new Set(mine.map((a) => a.name.toLowerCase()));
+    const list = [...mine, ...DEFAULT_ACTIONS.filter((a) => !have.has(a.name.toLowerCase()))];
+    if (await save({ ask_actions: list }, true)) renderActions();
   });
 
   // projects

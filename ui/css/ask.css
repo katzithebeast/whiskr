@@ -303,3 +303,23 @@ html.embed, html.embed body { background: transparent; }
 /* opening straight into a continued chat: the reverse of chatOut */
 .shell[data-state="expanded"] .panel.enter { animation: chatIn .26s cubic-bezier(.16,1,.3,1) both; }
 @keyframes chatIn { from { opacity: 0; transform: translateY(18px) scale(.975); } to { opacity: 1; transform: none; } }
+
+/* ───────── attachments ───────── */
+.icon.attach { margin-bottom: 3px; flex: none; }
+.ctx .chip.att { padding: 3px 8px 3px 4px; gap: 6px; max-width: 240px; }
+.ctx .chip.att .thumb { width: 26px; height: 26px; border-radius: 7px; object-fit: cover; display: block; }
+.ctx .chip.att .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.ctx .chip .spin { width: 12px; height: 12px; }
+.u .ufiles { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; justify-content: flex-end; }
+.u .uimg { display: block; border-radius: 10px; overflow: hidden; border: 1px solid var(--line2); cursor: zoom-in; max-width: 220px; }
+.u .uimg img { display: block; max-width: 220px; max-height: 160px; object-fit: cover; }
+.u .udoc { font-size: 12.5px; font-weight: 700; color: var(--text); background: var(--bg2); border: 1px solid var(--line); border-radius: 9px; padding: 5px 9px; cursor: pointer; }
+.u .udoc:hover { border-color: var(--line2); }
+.panel.dropping::after { box-shadow: inset 0 0 0 2px rgba(236,234,228,.55); }
+
+/* /commands */
+.menu.slash { left: 8px; right: auto; min-width: 300px; max-width: min(440px, calc(100% - 16px)); }
+.menu.slash button { flex-direction: column; align-items: flex-start; gap: 1px; }
+.menu.slash button b { font-weight: 800; font-size: 13px; }
+.menu.slash button small { margin-left: 0; font-weight: 600; font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.side-item .t .snip { display: block; font-size: 11px; font-weight: 600; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
