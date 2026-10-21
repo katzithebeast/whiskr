@@ -9,7 +9,7 @@ const api = TAURI ? { invoke: TAURI.core.invoke, listen: TAURI.event.listen } : 
 const EMBED = new URLSearchParams(location.search).has("embed");
 if (EMBED) document.documentElement.classList.add("embed");
 const toParent = (msg) => window.parent.postMessage({ whiskr: true, ...msg }, "*");
-const POPUP_ONLY = ["ask_layout", "ask_region", "set_glass", "ask_hide", "ask_close_cancel", "ask_hide_after"];
+const POPUP_ONLY = ["ask_layout", "ask_uncloak", "set_glass", "ask_hide", "ask_close_cancel", "ask_hide_after"];
 const listen = api.listen;
 const dbg = (m) => { try { api.invoke("dbg_log", { msg: m }).catch(() => {}); } catch {} };
 const invoke = (cmd, args) => {
@@ -469,44 +469,42 @@ let layoutSeq = 0;
 let compactH = 0;
 
 // Collapsed: the window is exactly the bar. Grows upward (bottom edge stays).
-// Windows: the window keeps its full size; we clip it to what's visible.
+// Expanded: the window is the whole chat. Every real resize of a visible
+// window happens cloaked (the core hides it from the screen for a moment), and
+// we show it again once we've painted at the new size — no flicker, no jump.
 const IS_WIN = !EMBED && /Windows/i.test(navigator.userAgent);
-let lastRegion = "";
-function setRegion(x, y, w, h) {
-  // +2: Windows cuts the region with hard (pixelated) edges, so it stays a
-  // little outside the panel and the page's own smooth corners show
-  const r = ($("#shell").classList.contains("glass") ? 8 : 22) + 2;
-  const key = [x, y, w, h, r].map(Math.round).join(",");
-  if (key === lastRegion) return;
-  lastRegion = key;
-  invoke("ask_region", { x, y, w, h, r }).catch(() => {});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let layoutQ = Promise.resolve();
+// resize the window (one at a time) and resolve once it shows the new size
+function layoutWin(expanded, height = null) {
+  const job = async () => {
+    const before = window.innerHeight;
+    const t0 = performance.now();
+    const cloaked = await invoke("ask_layout", { expanded, height }).catch(() => false);
+    if (!cloaked) return;
+    for (let i = 0; i < 20 && window.innerHeight === before; i++) await Promise.race([nextFrame(), sleep(20)]);
+    // two painted frames at the new size (but never wait long)
+    await Promise.race([nextFrame().then(nextFrame), sleep(60)]);
+    invoke("ask_uncloak").catch(() => {});
+    dbg(`layoutWin ${expanded ? "chat" : "bar"} ${before}→${window.innerHeight} in ${Math.round(performance.now() - t0)} ms`);
+  };
+  return (layoutQ = layoutQ.then(job, job));
 }
-// region = the panel (+ the model menu when it's open above it)
-function updateRegion() {
-  if (!IS_WIN) return;
-  // layout box (ignores the appear animation's scale)
-  const el = $("#panel");
-  if (!el.offsetHeight) return;
-  let x1 = el.offsetLeft, y1 = el.offsetTop, x2 = x1 + el.offsetWidth, y2 = y1 + el.offsetHeight;
-  const m = $("#engine-menu");
-  if (!m.hidden) {
-    const r = m.getBoundingClientRect();
-    x1 = Math.min(x1, r.left); y1 = Math.min(y1, r.top); x2 = Math.max(x2, r.right); y2 = Math.max(y2, r.bottom);
-  }
-  setRegion(x1 - 2, y1 - 2, x2 - x1 + 4, y2 - y1 + 4);
-}
-window.addEventListener("resize", () => requestAnimationFrame(updateRegion));
 
 function fitCompact(extra = 0) {
   if ($("#shell").dataset.state !== "compact") return;
-  if (IS_WIN) return requestAnimationFrame(updateRegion);
   // composer = the whole collapsed panel (+2 border, +6 window padding)
   const inner = $("#composer").scrollHeight;
   if (!inner) return; // hidden window: no layout yet
   const h = Math.max(60, Math.ceil(inner + 2 + 6 + extra));
   if (h === compactH) return;
   compactH = h;
-  invoke("ask_layout", { expanded: false, height: h }).catch(() => {});
+  layoutWin(false, h);
+}
+
+function clearGrow(panel) {
+  panel.classList.remove("anim");
+  panel.style.clipPath = panel.style.transition = panel.style.height = panel.style.maxWidth = "";
 }
 
 async function setExpanded(on, animate = true) {
@@ -518,66 +516,49 @@ async function setExpanded(on, animate = true) {
   const seq = ++layoutSeq;
   if (!on) {
     shell.dataset.state = "compact";
-    panel.classList.remove("anim");
-    panel.style.height = "";
+    clearGrow(panel);
     renderChrome();
     await nextFrame();
     compactH = 0;
     fitCompact();
     return;
   }
-  if (IS_WIN) {
-    // No resize at all: open the clip to the full window, then grow the panel.
-    const from = panel.getBoundingClientRect().height;
-    const fromW = panel.getBoundingClientRect().width;
-    panel.style.height = from + "px";
-    panel.style.maxWidth = fromW + "px";
-    shell.dataset.state = "expanded";
-    renderChrome();
-    setRegion(1, 1, window.innerWidth - 2, window.innerHeight - 2);
-    if (!animate) {
-      panel.style.height = panel.style.maxWidth = "";
-      return;
-    }
-    panel.offsetHeight;
-    panel.classList.add("anim");
-    panel.style.height = shell.clientHeight - 6 + "px";
-    panel.style.maxWidth = shell.clientWidth - 6 + "px";
-    const doneW = () => {
-      if (seq !== layoutSeq) return;
-      panel.classList.remove("anim");
-      panel.style.height = panel.style.maxWidth = "";
-      const th = $("#thread");
-      th.scrollTop = th.scrollHeight;
-      updateRegion();
-    };
-    panel.addEventListener("transitionend", doneW, { once: true });
-    setTimeout(doneW, animMs() + 150);
-    return;
-  }
-  // Grow the window first (instantly, upward), then let the panel slide up.
-  const from = panel.getBoundingClientRect().height;
-  const before = window.innerHeight;
-  panel.style.height = from + "px";
+  // The bar's rectangle now; after the resize the chat starts clipped to
+  // exactly that (same place on screen) and opens upward. Only clip-path
+  // animates — no layout per frame, the chat is laid out once.
+  const r0 = panel.getBoundingClientRect();
   shell.dataset.state = "expanded";
+  clearGrow(panel);
   renderChrome();
-  await invoke("ask_layout", { expanded: true, height: null }).catch(() => {});
-  if (before < 300) for (let i = 0; i < 30 && window.innerHeight === before; i++) await nextFrame();
-  else await nextFrame();
+  const radius = parseFloat(getComputedStyle(panel).borderRadius) || 0;
+  let clipped = false;
+  const clipToBar = () => {
+    if (clipped || !animate || !TAURI_ANIM) return;
+    const r1 = panel.getBoundingClientRect();
+    if (r1.height <= r0.height + 4) return; // window not resized yet
+    clipped = true;
+    const top = Math.max(0, r1.bottom - r0.height - r1.top);
+    const side = Math.max(0, (r1.width - r0.width) / 2);
+    panel.style.transition = "none";
+    panel.style.clipPath = `inset(${top}px ${side}px 0px ${side}px round ${radius}px)`;
+  };
+  // the resize callback lands before the page paints the new size
+  const onResize = () => clipToBar();
+  window.addEventListener("resize", onResize);
+  await layoutWin(true);
+  window.removeEventListener("resize", onResize);
   if (seq !== layoutSeq) return;
-  const to = shell.clientHeight - 6;
-  if (!animate || !TAURI_ANIM) {
-    panel.style.height = "";
-    return;
-  }
+  clipToBar();
+  const th = $("#thread");
+  th.scrollTop = th.scrollHeight;
+  if (!clipped) return;
   panel.offsetHeight;
   panel.classList.add("anim");
-  panel.style.height = to + "px";
+  panel.style.transition = `clip-path ${animMs()}ms cubic-bezier(.16,1,.3,1)`;
+  panel.style.clipPath = `inset(0px 0px 0px 0px round ${radius}px)`;
   const done = () => {
     if (seq !== layoutSeq) return;
-    panel.classList.remove("anim");
-    panel.style.height = "";
-    const th = $("#thread");
+    clearGrow(panel);
     th.scrollTop = th.scrollHeight;
   };
   panel.addEventListener("transitionend", done, { once: true });
@@ -1383,7 +1364,6 @@ listen("whiskr:ask-prefill", async (ev) => {
   if (!shown) {
     $("#shell").dataset.state = "compact";
     enterBar();
-    updateRegion();
   }
   if (!conv || conv.items.length) fresh(false);
   input.value = text || "";
@@ -1398,11 +1378,11 @@ listen("whiskr:ask-prefill", async (ev) => {
 // slides up into the full chat.
 listen("whiskr:ask-hidden", () => {
   layoutSeq++;
-  lastRegion = "";
+  compactH = 0;
   closeMenu();
   const panel = $("#panel");
-  panel.classList.remove("anim", "enter", "leave");
-  panel.style.height = "";
+  panel.classList.remove("enter", "leave");
+  clearGrow(panel);
   panel.classList.add("away");
   dbg("ask-hidden");
   closing = false;
@@ -1458,7 +1438,6 @@ listen("whiskr:ask-open", async (ev) => {
     }
     $("#shell").dataset.state = "compact";
     enterBar();
-    updateRegion();
     const recent = conv && conv.items.length && Date.now() - conv.updated < 15 * 60e3;
     const busy = conv && [...runs.values()].some((a) => a.conv === conv.id);
     closeMenu();

@@ -1340,19 +1340,22 @@ fn profile_key(s: &Settings, id: Option<&str>) -> String {
 /// Height of the collapsed ask bar (the page measures itself and tells us).
 static ASK_COMPACT_H: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(62);
 
-/// Windows: put the (always full-size) chat window at the bottom centre of the
-/// monitor with the mouse — straight through Win32 and only when it has to
-/// move, so opening never waits on the UI thread.
+/// Windows: size and place the chat window — the bar (compact) or the whole
+/// chat (expanded) — at the bottom centre of the monitor with the mouse.
+/// Straight through Win32, only when something changes.
+/// Returns None when there's no window yet, else whether it really moved/resized.
+/// `cloak`: hide it from the screen (DWM) before resizing — the page shows it
+/// again once it has painted at the new size (ask_uncloak).
 #[cfg(windows)]
-fn place_ask_raw() -> bool {
+fn place_ask_raw(expanded: bool, cloak: bool) -> Option<bool> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
     use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOZORDER};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
     static LAST: parking_lot::Mutex<(i32, i32, i32, i32)> = parking_lot::const_mutex((0, 0, 0, 0));
     let h = ASK_HWND.load(AO::SeqCst);
     if h == 0 {
-        return false;
+        return None;
     }
     unsafe {
         let mut pt = POINT { x: 0, y: 0 };
@@ -1361,31 +1364,51 @@ fn place_ask_raw() -> bool {
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
         if GetMonitorInfoW(mon, &mut mi) == 0 {
-            return false;
+            return None;
         }
         let (mut dx, mut dy) = (96u32, 96u32);
         GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
         let sf = dx.max(96) as f64 / 96.0;
         let wa = mi.rcWork;
         let (ww, wh) = ((wa.right - wa.left) as f64, (wa.bottom - wa.top) as f64);
-        let pw = (820.0 * sf) as i32;
-        let ph = ((620.0 * sf).min(wh - 40.0 * sf)) as i32;
+        let compact_h = ASK_COMPACT_H.load(AO::Relaxed) as f64;
+        let (lw, lh) = if expanded { (820.0, 620.0) } else { (700.0, compact_h) };
+        let pw = (lw * sf) as i32;
+        let ph = ((lh * sf).min(wh - 40.0 * sf)) as i32;
         let x = wa.left + (ww as i32 - pw) / 2;
         let y = wa.top + wh as i32 - ph - (56.0 * sf) as i32;
         let want = (x, y, pw, ph);
         let mut last = LAST.lock();
-        if *last != want {
-            *last = want;
-            SetWindowPos(h as _, std::ptr::null_mut(), x, y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        if *last == want {
+            return Some(false);
+        }
+        *last = want;
+        if cloak {
+            cloak_ask(true);
+        }
+        SetWindowPos(h as _, std::ptr::null_mut(), x, y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    Some(true)
+}
+
+/// Hide / show the chat window from the compositor only (DWM "cloak"): it
+/// stays alive and keeps painting, nothing on screen. Used to resize it
+/// between bar and full chat without anyone seeing a half-painted frame.
+#[cfg(windows)]
+fn cloak_ask(on: bool) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
+    let h = ASK_HWND.load(AO::SeqCst);
+    if h != 0 {
+        let v: i32 = on as i32;
+        unsafe {
+            DwmSetWindowAttribute(h as _, DWMWA_CLOAK as u32, &v as *const i32 as *const _, 4);
         }
     }
-    true
 }
 
 fn place_ask(app: &AppHandle, expanded: bool) {
     #[cfg(windows)]
-    if place_ask_raw() {
-        let _ = expanded;
+    if place_ask_raw(expanded, false).is_some() {
         return;
     }
     let Some(w) = app.get_webview_window("ask") else { return };
@@ -1398,9 +1421,6 @@ fn place_ask(app: &AppHandle, expanded: bool) {
     let sf = m.scale_factor();
     let wa = m.work_area();
     let compact_h = ASK_COMPACT_H.load(std::sync::atomic::Ordering::Relaxed) as f64;
-    // Windows: the window always has the full size and is clipped to the bar
-    // with a window region — so it never resizes while animating (no flicker).
-    let expanded = expanded || cfg!(windows);
     let (lw, lh) = if expanded { (820.0, 620.0) } else { (700.0, compact_h) };
     let max_h = wa.size.height as f64 / sf - 40.0;
     let size = tauri::LogicalSize::new(lw, if lh > max_h { max_h } else { lh });
@@ -1550,6 +1570,9 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
         // always appear as the small bar; the page slides it up if a chat continues
         place_ask(app, false);
     }
+    CLOAK_GEN.fetch_add(1, AO::SeqCst);
+    #[cfg(windows)]
+    cloak_ask(false);
     // Show right away but WITHOUT taking focus: the selection (Ctrl+C) still has
     // to go to the app the user was in. The page keeps the panel invisible until
     // the "show" event, so the intro animation is what you actually see.
@@ -1868,12 +1891,50 @@ fn ask_cancel(run: u64) {
     agents::cancel(run);
 }
 
+static CLOAK_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The page switches between the bar and the full chat, or the bar grows (a
+/// new line, the model menu). The window really resizes — no clipping region
+/// any more (Windows repainted the big chat through the UI thread for every
+/// region change, freezing everything for seconds). To hide the one frame
+/// where the old picture sits at the wrong place, a visible window is cloaked,
+/// resized, and shown again by the page once it has painted (ask_uncloak).
+/// Returns true when it cloaked (the page must call ask_uncloak).
 #[tauri::command]
-fn ask_layout(app: AppHandle, expanded: bool, height: Option<f64>) {
+async fn ask_layout(app: AppHandle, expanded: bool, height: Option<f64>) -> bool {
     if let Some(h) = height.filter(|h| *h > 30.0 && *h < 500.0) {
         ASK_COMPACT_H.store(h.round() as u32, std::sync::atomic::Ordering::Relaxed);
     }
+    #[cfg(windows)]
+    {
+        let visible = ask_visible(&app);
+        let gen = CLOAK_GEN.fetch_add(1, AO::SeqCst) + 1;
+        let moved = place_ask_raw(expanded, visible);
+        if moved == Some(true) && visible {
+            // safety net: never stay cloaked if the page doesn't answer
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                if CLOAK_GEN.load(AO::SeqCst) == gen {
+                    dlog!("ask_layout: page did not uncloak, doing it");
+                    cloak_ask(false);
+                }
+            });
+            return true;
+        }
+        if moved.is_some() {
+            return false;
+        }
+    }
     place_ask(&app, expanded);
+    false
+}
+
+/// The page has painted at the new size: show it.
+#[tauri::command]
+async fn ask_uncloak() {
+    CLOAK_GEN.fetch_add(1, AO::SeqCst);
+    #[cfg(windows)]
+    cloak_ask(false);
 }
 
 // ───────────────────────────── updates ─────────────────────────────
@@ -2045,14 +2106,6 @@ fn close_ask(app: &AppHandle) {
     hide_ask_later(app, gen, 650);
 }
 
-#[cfg(windows)]
-fn clear_region(hwnd: isize) {
-    use windows_sys::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
-    unsafe {
-        SetWindowRgn(hwnd as _, CreateRectRgn(0, 0, 0, 0), 0);
-    }
-}
-
 fn hide_ask(app: &AppHandle) {
     dlog!("hide_ask");
     if let Some(w) = app.get_webview_window("ask") {
@@ -2064,18 +2117,13 @@ fn hide_ask(app: &AppHandle) {
         #[cfg(windows)]
         let had_keyboard = ask_h != 0 && unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize == ask_h;
         #[cfg(windows)]
-        #[cfg(windows)]
         let t0 = Instant::now();
         #[cfg(windows)]
         if ask_h != 0 {
-            // Hide first (cheap), then clip the hidden window to nothing so the
-            // next show never flashes an old frame (no repaint: it's hidden).
             unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(ask_h as _, windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE);
             }
-            let t1 = t0.elapsed().as_millis();
-            clear_region(ask_h);
-            dlog!("hide_ask: hide {} ms, clear region {} ms", t1, t0.elapsed().as_millis() - t1);
+            dlog!("hide_ask: hide {} ms", t0.elapsed().as_millis());
         }
         #[cfg(not(windows))]
         let _ = w.hide();
@@ -2166,37 +2214,6 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
         let _ = tx.send(f.map(|p| p.to_string()));
     });
     rx.await.ok().flatten()
-}
-
-/// Clip the ask window to the visible panel (CSS px, relative to the window).
-/// Outside it the window doesn't exist: nothing drawn, clicks go through.
-#[tauri::command]
-async fn ask_region(app: AppHandle, x: f64, y: f64, w: f64, h: f64, r: f64) {
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
-        use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-        let _ = &app;
-        // straight from Windows (asking the window library waits for the UI thread)
-        let hwnd = ASK_HWND.load(AO::SeqCst);
-        if hwnd == 0 {
-            return;
-        }
-        let dpi = unsafe { GetDpiForWindow(hwnd as _) };
-        let sf = if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 };
-        let px = |v: f64| (v * sf).round() as i32;
-        unsafe {
-            let rgn = CreateRoundRectRgn(px(x), px(y), px(x + w) + 1, px(y + h) + 1, px(r * 2.0), px(r * 2.0));
-            // the system owns the region afterwards
-            // bRedraw = 0: no forced synchronous repaint of the whole window.
-            // With the big chat that repaint kept the UI thread busy for 1–3 s
-            // (and everything — closing included — queued up behind it).
-            // WebView2 composes through DWM, so the new shape still shows at once.
-            SetWindowRgn(hwnd as _, rgn, 0);
-        }
-    }
-    #[cfg(not(windows))]
-    let _ = (app, x, y, w, h, r);
 }
 
 /// Frosted glass: Windows blurs whatever is behind the window (Acrylic).
@@ -2544,21 +2561,24 @@ pub fn run() {
                     no_dwm_transitions(h.0 as isize);
                     bare_ask_frame(h.0 as isize);
                     // WebView2 paints a blank frame the first time a window is
-                    // shown. Do that first show now, invisibly (empty region,
-                    // no activation), so Shift+Space never sees it.
+                    // shown. Do that first show now, cloaked (DWM doesn't put it on
+                    // screen, no activation), so Shift+Space never sees it.
                     let hwnd = h.0 as isize;
-                    clear_region(hwnd);
+                    cloak_ask(true);
                     std::thread::spawn(move || {
                         use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindowVisible, ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE};
                         std::thread::sleep(Duration::from_millis(1200));
                         unsafe {
-                            if IsWindowVisible(hwnd as _) != 0 {
+                            if IsWindowVisible(hwnd as _) != 0 || ASK_WANT.load(AO::SeqCst) {
+                                cloak_ask(false);
                                 return; // already opened by the user
                             }
                             ShowWindow(hwnd as _, SW_SHOWNOACTIVATE);
                             std::thread::sleep(Duration::from_millis(350));
-                            if CLOSE_GEN.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                            if !ASK_WANT.load(AO::SeqCst) {
                                 ShowWindow(hwnd as _, SW_HIDE);
+                            } else {
+                                cloak_ask(false);
                             }
                         }
                     });
@@ -2695,7 +2715,6 @@ pub fn run() {
             ask_models,
             pick_background,
             set_glass,
-            ask_region,
             mcp_hub::connections_status,
             mcp_hub::account_logout,
             mcp_hub::mcp_status,
@@ -2704,6 +2723,7 @@ pub fn run() {
             ask_hide,
             ask_close_cancel,
             ask_hide_after,
+            ask_uncloak,
             ask_toggle,
             dbg_log,
             check_update,

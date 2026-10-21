@@ -46,7 +46,7 @@ svg { stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round
   overflow: hidden; animation: pop .26s var(--ease);
 }
 .panel.anim { transition: height var(--expand-ms, 620ms) cubic-bezier(.16,1,.3,1), max-width var(--expand-ms, 620ms) cubic-bezier(.16,1,.3,1); }
-/* the collapsed bar keeps its width inside the (Windows: always full-size) window */
+/* the collapsed bar: 700 px wide */
 .shell[data-state="compact"] .panel { max-width: 700px; }
 .panel.anim .thread, .panel.anim .head { animation: fadeup calc(var(--expand-ms, 620ms) * .9) cubic-bezier(.16,1,.3,1) both; }
 @keyframes fadeup { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }

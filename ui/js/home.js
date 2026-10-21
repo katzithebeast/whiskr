@@ -2,6 +2,9 @@
 import { cat, keyLabels } from "./cat.js";
 
 export const CHANGELOG = [
+  { v: "0.16.12", d: "2026-10-21",
+    cs: ["Rozbalení a sbalení chatu bez zasekávání", "Okno chatu se teď opravdu zvětšuje a zmenšuje (dřív se jen ořezávalo, a to Windows při každé změně zamrazilo na 1–3 s). Přechod je schovaný, takže nic nebliká, a rozbalení animuje jen ořez — chat se nepřepočítává každý snímek."],
+    en: ["Chat expands and collapses without stalls", "The chat window now really resizes (it used to be clipped, which froze Windows for 1–3 s on every change). The switch is hidden so nothing flickers, and the expand animates only a clip — the chat isn't re-laid out every frame."] },
   { v: "0.16.11", d: "2026-10-21",
     cs: ["Bezpečnost: pryč s podezřelými triky", "Označený text se čte přes Windows (UI Automation) bez kopírování a sahání do schránky. Žádné spouštění cmd.exe ani umělé stisky Alt. Diagnostický log je vypnutý, dokud ho nezapneš. Sestavuje se standardně ve Windows na GitHubu."],
     en: ["Security: no more suspicious tricks", "Selected text is read through Windows (UI Automation) — no copying, clipboard untouched. No cmd.exe launches or faked Alt presses. The diagnostic log is off unless you turn it on. Built the standard way on Windows (GitHub)."] },
