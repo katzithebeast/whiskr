@@ -1566,9 +1566,13 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     }
     let want_sel = state.settings.lock().ask_selection && !ours && !TERMINALS.contains(&target.exe.as_str()) && !target.exe.is_empty();
     let was_visible = false;
+    // A chat that continues (the page told us when it hid) opens straight as
+    // the full chat — no bar first. Otherwise the small bar.
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let big = !fresh && now_ms < ASK_NEXT_BIG_UNTIL.load(AO::SeqCst);
+    dlog!("open_ask: as {}", if big { "chat" } else { "bar" });
     if !was_visible {
-        // always appear as the small bar; the page slides it up if a chat continues
-        place_ask(app, false);
+        place_ask(app, big);
     }
     CLOAK_GEN.fetch_add(1, AO::SeqCst);
     #[cfg(windows)]
@@ -1588,7 +1592,7 @@ fn open_ask(app: &AppHandle, fresh: bool, chord: bool) {
     #[cfg(not(windows))]
     let _ = w.show();
     if !was_visible {
-        let _ = app.emit_to("ask", "whiskr:ask-open", json!({ "phase": "show", "fresh": fresh }));
+        let _ = app.emit_to("ask", "whiskr:ask-open", json!({ "phase": "show", "fresh": fresh, "expanded": big }));
     }
     let gen = CLOSE_GEN.load(std::sync::atomic::Ordering::SeqCst);
     let app2 = app.clone();
@@ -1929,6 +1933,16 @@ async fn ask_layout(app: AppHandle, expanded: bool, height: Option<f64>) -> bool
     false
 }
 
+static ASK_NEXT_BIG_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The page, when it hides: "the next opening continues the chat" for ttl_ms
+/// (0 = it starts with the bar). Lets open_ask show the full chat directly.
+#[tauri::command]
+async fn ask_next_open(expanded: bool, ttl_ms: u64) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    ASK_NEXT_BIG_UNTIL.store(if expanded { now + ttl_ms } else { 0 }, AO::SeqCst);
+}
+
 /// The page has painted at the new size: show it.
 #[tauri::command]
 async fn ask_uncloak() {
@@ -2109,9 +2123,10 @@ fn close_ask(app: &AppHandle) {
 fn hide_ask(app: &AppHandle) {
     dlog!("hide_ask");
     if let Some(w) = app.get_webview_window("ask") {
-        // Clip everything away first: when the window comes back, WebView2 shows
-        // its last frame for a moment — with an empty region that frame is never
-        // seen; the page sets the real region once it's ready.
+        // (its last frame is the end of the leave animation — fully transparent —
+        // so showing it again later never flashes old content)
+        #[cfg(windows)]
+        let _ = &w;
         #[cfg(windows)]
         let ask_h = ASK_HWND.load(AO::SeqCst);
         #[cfg(windows)]
@@ -2724,6 +2739,7 @@ pub fn run() {
             ask_close_cancel,
             ask_hide_after,
             ask_uncloak,
+            ask_next_open,
             ask_toggle,
             dbg_log,
             check_update,

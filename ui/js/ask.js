@@ -9,7 +9,7 @@ const api = TAURI ? { invoke: TAURI.core.invoke, listen: TAURI.event.listen } : 
 const EMBED = new URLSearchParams(location.search).has("embed");
 if (EMBED) document.documentElement.classList.add("embed");
 const toParent = (msg) => window.parent.postMessage({ whiskr: true, ...msg }, "*");
-const POPUP_ONLY = ["ask_layout", "ask_uncloak", "set_glass", "ask_hide", "ask_close_cancel", "ask_hide_after"];
+const POPUP_ONLY = ["ask_layout", "ask_uncloak", "set_glass", "ask_hide", "ask_close_cancel", "ask_hide_after", "ask_next_open"];
 const listen = api.listen;
 const dbg = (m) => { try { api.invoke("dbg_log", { msg: m }).catch(() => {}); } catch {} };
 const invoke = (cmd, args) => {
@@ -1385,6 +1385,7 @@ listen("whiskr:ask-hidden", () => {
   clearGrow(panel);
   panel.classList.add("away");
   dbg("ask-hidden");
+  tellNextOpen();
   closing = false;
   shown = false;
   clearTimeout(closeTimer);
@@ -1405,6 +1406,20 @@ function enterBar() {
   panel.classList.remove("away", "enter", "leave");
   void panel.offsetWidth; // restart the animation
   panel.classList.add("enter");
+}
+
+// Does the next Shift+Space continue this chat (recent, or an agent still working)?
+const CONTINUE_MS = 15 * 60e3;
+function continues() {
+  if (!conv || !conv.items.length) return false;
+  return Date.now() - conv.updated < CONTINUE_MS || [...runs.values()].some((a) => a.conv === conv.id);
+}
+// tell the core, so it can open the full chat right away (no bar first)
+function tellNextOpen() {
+  const busy = conv && [...runs.values()].some((a) => a.conv === conv.id);
+  const go = continues();
+  const ttl = !go ? 0 : busy ? 60 * 60e3 : Math.max(0, CONTINUE_MS - (Date.now() - conv.updated) - 2000);
+  invoke("ask_next_open", { expanded: go, ttlMs: Math.round(ttl) }).catch(() => {});
 }
 
 function continueChat(c) {
@@ -1436,20 +1451,36 @@ listen("whiskr:ask-open", async (ev) => {
       }
       return;
     }
-    $("#shell").dataset.state = "compact";
-    enterBar();
-    const recent = conv && conv.items.length && Date.now() - conv.updated < 15 * 60e3;
-    const busy = conv && [...runs.values()].some((a) => a.conv === conv.id);
+    const cont = !p.fresh && continues();
     closeMenu();
     if (!EMBED) sideOpen = false;
     $("#shell").classList.toggle("side-open", sideOpen);
-    if (p.fresh || (!recent && !busy)) {
-      fresh(false);
-      if (p.fresh) {
-        input.value = "";
-        autosize();
+    if (cont && p.expanded) {
+      // the core already opened the window at full size: show the chat as is
+      layoutSeq++;
+      clearGrow($("#panel"));
+      $("#shell").dataset.state = "expanded";
+      renderChrome();
+      enterBar();
+      render();
+      const th = $("#thread");
+      th.scrollTop = th.scrollHeight;
+    } else {
+      $("#shell").dataset.state = "compact";
+      enterBar();
+      if (p.expanded) {
+        // opened big but it's the bar after all: shrink the window to it
+        compactH = 0;
+        requestAnimationFrame(() => fitCompact());
       }
-    } else continueChat(conv);
+      if (!cont) {
+        fresh(false);
+        if (p.fresh) {
+          input.value = "";
+          autosize();
+        }
+      } else continueChat(conv);
+    }
     loadSettings().then(() => {
       renderChrome();
       renderSide();

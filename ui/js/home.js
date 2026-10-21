@@ -2,6 +2,9 @@
 import { cat, keyLabels } from "./cat.js";
 
 export const CHANGELOG = [
+  { v: "0.16.13", d: "2026-10-21",
+    cs: ["Rozepsaný chat se otevře rovnou celý", "Když Shift+Space navazuje na chat, objeví se hned celý — bez mezikroku s malou lištou."],
+    en: ["A continued chat opens in full right away", "When Shift+Space continues a chat, it appears in full straight away — no small bar first."] },
   { v: "0.16.12", d: "2026-10-21",
     cs: ["Rozbalení a sbalení chatu bez zasekávání", "Okno chatu se teď opravdu zvětšuje a zmenšuje (dřív se jen ořezávalo, a to Windows při každé změně zamrazilo na 1–3 s). Přechod je schovaný, takže nic nebliká, a rozbalení animuje jen ořez — chat se nepřepočítává každý snímek."],
     en: ["Chat expands and collapses without stalls", "The chat window now really resizes (it used to be clipped, which froze Windows for 1–3 s on every change). The switch is hidden so nothing flickers, and the expand animates only a clip — the chat isn't re-laid out every frame."] },
