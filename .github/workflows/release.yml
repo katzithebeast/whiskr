@@ -1,0 +1,58 @@
+# Builds the Windows installer and publishes it as a GitHub Release.
+# Run it by pushing a tag:  git tag v0.15.3 && git push origin v0.15.3
+# (or by hand: Actions → Release → Run workflow).
+#
+# The repo is public, so the in-app updater reads releases without any token.
+# (If it ever goes private: add a read-only token as the WHISKR_UPDATE_TOKEN
+# secret — it gets baked into the app.)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Version from Cargo.toml
+        id: ver
+        shell: bash
+        run: echo "v=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        shell: bash
+        env:
+          WHISKR_UPDATE_TOKEN: ${{ secrets.WHISKR_UPDATE_TOKEN }}
+          WHISKR_REPO: ${{ github.repository }}
+        run: |
+          cargo build --release --manifest-path src-tauri/Cargo.toml --bin whiskr-mcp
+          npx tauri build --bundles nsis --config '{"bundle":{"resources":{"target/release/whiskr-mcp.exe":"whiskr-mcp.exe"}}}'
+          ls -la src-tauri/target/release/bundle/nsis
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          name: Whiskr ${{ steps.ver.outputs.v }}
+          generate_release_notes: true
+          files: src-tauri/target/release/bundle/nsis/*-setup.exe

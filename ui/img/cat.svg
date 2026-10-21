@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120">
+  <!-- Whiskr cat: head, ears, happy closed eyes, whiskers. -->
+  <g id="whiskers" fill="none" stroke="#111111" stroke-width="4.2" stroke-linecap="round">
+    <path d="M44 74 Q24 70 4 72"/>
+    <path d="M44 81 Q24 82 6 88"/>
+    <path d="M46 88 Q30 93 14 102"/>
+    <path d="M116 74 Q136 70 156 72"/>
+    <path d="M116 81 Q136 82 154 88"/>
+    <path d="M114 88 Q130 93 146 102"/>
+  </g>
+  <path id="head" fill="#111111" d="M35 46
+      C33 34 32 20 34 10 C35 5 39 4 43 7
+      C51 13 58 20 63 26
+      C74 23 86 23 97 26
+      C102 20 109 13 117 7 C121 4 125 5 126 10
+      C128 20 127 34 125 46
+      C132 56 133 70 128 82
+      C120 102 100 110 80 110
+      C60 110 40 102 32 82
+      C27 70 28 56 35 46 Z"/>
+  <g id="face" fill="none" stroke="#F8F6EF" stroke-width="5" stroke-linecap="round">
+    <path d="M52 66 Q60 57 68 66"/>
+    <path d="M92 66 Q100 57 108 66"/>
+  </g>
+</svg>

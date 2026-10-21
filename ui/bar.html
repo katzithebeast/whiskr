@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <title>Whiskr bar</title>
+  <style>
+    @font-face {
+      font-family: "Manrope Variable";
+      font-weight: 200 800;
+      src: url(fonts/manrope-latin-ext-wght-normal.woff2) format("woff2-variations");
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F;
+    }
+    @font-face {
+      font-family: "Manrope Variable";
+      font-weight: 200 800;
+      src: url(fonts/manrope-latin-wght-normal.woff2) format("woff2-variations");
+      unicode-range: U+0000-00FF, U+2000-206F, U+20AC, U+2122;
+    }
+    :root { --cream: #F8F6EF; --black: #111111; --stone: #9CA3AF; --green: #3BB273; --red: #FF8A7A; }
+    html, body {
+      margin: 0; height: 100%; background: transparent; overflow: hidden;
+      font-family: "Satoshi", "Manrope Variable", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; user-select: none; cursor: default;
+    }
+    .stage { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 14px; }
+
+    .pill {
+      height: 50px; padding: 0 20px 0 10px; border-radius: 999px;
+      background: var(--black); color: var(--cream);
+      display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,.28), 0 2px 6px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.06);
+      opacity: 0; transform: translateY(16px) scale(.9);
+      transition: opacity .22s ease, transform .32s cubic-bezier(.2,1.4,.4,1), padding .25s ease;
+      max-width: 400px;
+    }
+    .pill.show { opacity: 1; transform: none; }
+
+    .cat { width: 38px; flex: none; color: var(--cream); transition: transform .3s ease; }
+    .pill[data-phase="listening"] .cat,
+    .pill[data-phase="command"] .cat,
+    .pill[data-phase="preview"] .cat,
+    .pill[data-phase="handsfree"] .cat { animation: perk 1.6s ease-in-out infinite; }
+    @keyframes perk { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px) scale(1.04); } }
+    .pill[data-phase="thinking"] .cat { animation: tilt 1.2s ease-in-out infinite; }
+    @keyframes tilt { 0%,100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+
+    .visual { display: none; align-items: center; height: 24px; }
+    .wave { gap: 3px; }
+    .wave i { display: block; width: 3px; height: 4px; border-radius: 3px; background: var(--cream); transition: height .08s linear; }
+    .dots { gap: 5px; }
+    .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--cream); animation: dot 1s ease-in-out infinite; }
+    .dots i:nth-child(2) { animation-delay: .15s; }
+    .dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes dot { 0%,100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
+    .check { width: 24px; height: 24px; border-radius: 50%; background: var(--green); justify-content: center; animation: popin .35s cubic-bezier(.2,1.6,.4,1); }
+    @keyframes popin { from { transform: scale(.3); } to { transform: scale(1); } }
+    .check svg { width: 14px; height: 14px; }
+    .rec { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1s ease-in-out infinite; }
+    @keyframes blink { 50% { opacity: .35; } }
+
+    .label { font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .label small { color: var(--stone); font-weight: 600; margin-left: 4px; }
+    .pill[data-phase="error"] .label, .pill[data-phase="empty"] .label { white-space: normal; line-height: 1.25; font-size: 12.5px; }
+    .pill[data-phase="error"] { height: auto; min-height: 50px; padding-top: 6px; padding-bottom: 6px; }
+    .pill[data-phase="error"] .label { color: #FFD3CC; }
+
+    .pill[data-phase="listening"] .wave,
+    .pill[data-phase="command"] .wave,
+    .pill[data-phase="preview"] .wave,
+    .pill[data-phase="handsfree"] .wave,
+    .pill[data-phase="thinking"] .dots,
+    .pill[data-phase="done"] .check { display: flex; }
+    .pill[data-phase="handsfree"] .rec { display: block; }
+    .rec { display: none; }
+    /* ───────── style presets ───────── */
+    /* Slim: thinner, smaller cat, smaller text. */
+    body.slim .stage { padding-bottom: 10px; }
+    body.slim .pill { height: 32px; padding: 0 14px 0 8px; gap: 8px; }
+    body.slim .cat { width: 22px; }
+    body.slim .visual { height: 16px; }
+    body.slim .wave { gap: 2px; }
+    body.slim .wave i { width: 2px; }
+    body.slim .dots { gap: 4px; }
+    body.slim .dots i { width: 4px; height: 4px; }
+    body.slim .check { width: 16px; height: 16px; }
+    body.slim .check svg { width: 10px; height: 10px; }
+    body.slim .rec { width: 6px; height: 6px; }
+    body.slim .label { font-size: 12px; }
+    body.slim .pill[data-phase="error"] { min-height: 32px; padding-top: 5px; padding-bottom: 5px; }
+    body.slim .pill[data-phase="error"] .label, body.slim .pill[data-phase="empty"] .label { font-size: 11.5px; }
+
+    /* Mini: just a tiny capsule with the wave. Text only when something went wrong. */
+    body.mini .stage { padding-bottom: 10px; }
+    body.mini .pill { height: 22px; padding: 0 10px; gap: 6px; }
+    body.mini .cat { display: none; }
+    body.mini .pill[data-phase="hello"] .cat { display: block; width: 18px; }
+    body.mini .label { display: none; font-size: 11.5px; }
+    body.mini .pill[data-phase="error"] .label,
+    body.mini .pill[data-phase="empty"] .label { display: block; }
+    body.mini .pill[data-phase="error"], body.mini .pill[data-phase="empty"] { height: auto; min-height: 22px; padding: 4px 12px; border-radius: 12px; }
+    body.mini .visual { height: 14px; }
+    body.mini .wave { gap: 2px; }
+    body.mini .wave i { width: 2px; }
+    body.mini .wave i:nth-child(-n+2), body.mini .wave i:nth-last-child(-n+2) { display: none; }
+    body.mini .dots { gap: 3px; }
+    body.mini .dots i { width: 3.5px; height: 3.5px; }
+    body.mini .check { width: 14px; height: 14px; }
+    body.mini .check svg { width: 9px; height: 9px; }
+    body.mini .rec { width: 5px; height: 5px; }
+    body.mini .pill[data-phase="cancelled"] .label { display: block; font-size: 11px; color: var(--stone); }
+    /* ───────── meeting recording (persistent) ───────── */
+    .time { display: none; font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    .pill[data-phase="rec"] .time { display: block; }
+    .pill[data-phase="rec"] .rec { display: block; }
+    .pill[data-phase="rec"] .wave { display: flex; }
+    .pill[data-phase="rec"] .label { color: var(--stone); font-weight: 600; font-size: 12.5px; }
+    .pill[data-phase="rec"] .cat { animation: none; }
+    .pill[data-phase="command"] .wave, .pill[data-phase="command"] .rec { display: flex; }
+    .pill[data-phase="command"] .rec { background: #8B9CFF; display: block; }
+    body.slim .time { font-size: 12px; }
+    body.slim .pill[data-phase="rec"] .label { font-size: 11px; }
+    body.mini .pill[data-phase="rec"] .time { display: block; font-size: 11px; }
+    body.mini .pill[data-phase="rec"] { padding: 0 10px 0 9px; }
+    /* little reminder dot on other states while a meeting is being recorded */
+    .recdot { display: none; width: 6px; height: 6px; border-radius: 50%; background: var(--red); margin-left: -4px; animation: blink 1s ease-in-out infinite; }
+    body.recording .pill:not([data-phase="rec"]) .recdot { display: block; }
+    /* ───────── "record this meeting?" offer (clickable) ───────── */
+    .offer-btns { display: none; gap: 6px; margin-left: 4px; flex: none; }
+    .pill[data-phase="offer"] { max-width: 520px; padding-right: 8px; }
+    .pill[data-phase="offer"] .offer-btns { display: flex; }
+    .offer-btns button { border: 0; border-radius: 99px; height: 32px; padding: 0 14px; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; white-space: nowrap; }
+    .offer-btns .yes { background: var(--cream); color: var(--black); }
+    .offer-btns .yes:hover { background: #fff; }
+    .offer-btns .no { background: rgba(255,255,255,.1); color: var(--cream); }
+    .offer-btns .no:hover { background: rgba(255,255,255,.18); }
+    body.slim .offer-btns button { height: 24px; padding: 0 10px; font-size: 11.5px; }
+    body.mini .pill[data-phase="offer"] { height: 34px; padding: 0 6px 0 12px; }
+    body.mini .pill[data-phase="offer"] .label { display: block; font-size: 12px; }
+    body.mini .offer-btns button { height: 24px; padding: 0 10px; font-size: 11.5px; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="pill" id="pill" data-phase="idle">
+      <span id="cat"></span>
+      <span class="recdot"></span>
+      <span class="rec"></span>
+      <span class="visual wave" id="wave"></span>
+      <span class="visual dots"><i></i><i></i><i></i></span>
+      <span class="visual check"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <span class="time" id="time"></span>
+      <span class="label" id="label"></span>
+      <span class="offer-btns"><button class="yes" id="offer-yes"></button><button class="no" id="offer-no"></button></span>
+    </div>
+  </div>
+
+  <script type="module">
+    import { cat, keyLabels } from "./js/cat.js";
+    import { BAR_STRINGS } from "./js/i18n.js";
+
+    const T = window.__TAURI__;
+    const pill = document.getElementById("pill");
+    const label = document.getElementById("label");
+    const wave = document.getElementById("wave");
+    document.getElementById("cat").innerHTML = cat({ body: "var(--cream)", eyes: "var(--black)" });
+
+    const BARS = 13;
+    wave.innerHTML = "<i></i>".repeat(BARS);
+    const bars = [...wave.children];
+    // A soft "speech envelope" so the middle bars move most.
+    const shape = bars.map((_, i) => 0.45 + 0.55 * Math.sin((Math.PI * (i + 0.5)) / BARS));
+
+    let lang = "cs";
+    let hotkey = "ctrl+shift+Space";
+    let hideTimer = null;
+    let level = 0;
+    let target = 0;
+    let animating = false;
+    let fakeVoice = false;
+    // Wave size per style: [resting height, max extra height] in px.
+    const AMP = { classic: [4, 20], slim: [3, 11], mini: [2.5, 9] };
+    let style = "classic";
+    // Meeting recording: shown whenever nothing else is on the bar.
+    let rec = { on: false, started: 0 };
+    let recTimer = null;
+    const fmt = (sec) => {
+      const t = Math.max(0, Math.floor(sec)), h = Math.floor(t / 3600), m = Math.floor((t / 60) % 60), r = t % 60;
+      return (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(r).padStart(2, "0");
+    };
+    function tickRec() {
+      document.getElementById("time").textContent = fmt((performance.now() - rec.started) / 1000);
+    }
+    function showRec() {
+      const S = BAR_STRINGS[lang] || BAR_STRINGS.cs;
+      tickRec();
+      show("rec", style === "mini" ? "" : S.rec);
+    }
+
+    function applyStyle(next) {
+      if (!next || !AMP[next]) next = "classic";
+      style = next;
+      document.body.classList.remove("classic", "slim", "mini");
+      document.body.classList.add(style);
+    }
+
+    async function refresh() {
+      try {
+        const s = await T.core.invoke("get_settings");
+        lang = s.ui_lang || "cs";
+        hotkey = s.hotkey;
+      } catch {}
+    }
+
+    // ── sounds (tiny synthesized clicks, no audio files) ──
+    let ctx = null;
+    function blip(up) {
+      try {
+        ctx = ctx || new AudioContext();
+        if (ctx.state === "suspended") ctx.resume();
+        const now = ctx.currentTime;
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.setValueAtTime(up ? 660 : 880, now);
+        o.frequency.exponentialRampToValueAtTime(up ? 990 : 590, now + 0.09);
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(0.09, now + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+        o.connect(g).connect(ctx.destination);
+        o.start(now);
+        o.stop(now + 0.16);
+      } catch {}
+    }
+
+    function animate() {
+      if (!animating) return;
+      const t = performance.now() / 140;
+      if (fakeVoice) target = Math.max(target, 0.35 + 0.35 * Math.abs(Math.sin(t * 0.9)));
+      level += (target - level) * 0.35;
+      target *= 0.9; // decay between level events
+      const [base, amp] = AMP[style];
+      bars.forEach((b, i) => {
+        const jitter = 0.75 + 0.25 * Math.sin(t + i * 1.7);
+        const breathe = (base * 0.3) * (1 + Math.sin(t * 0.6 + i * 0.5));
+        const h = base + breathe + Math.min(1, level) * amp * shape[i] * jitter;
+        b.style.height = h.toFixed(1) + "px";
+      });
+      requestAnimationFrame(animate);
+    }
+
+    function show(phase, text, hideAfter) {
+      clearTimeout(hideTimer);
+      pill.dataset.phase = phase;
+      label.innerHTML = text;
+      pill.classList.add("show");
+      animating = ["listening", "handsfree", "preview", "command", "rec"].includes(phase);
+      fakeVoice = phase === "preview";
+      if (animating) requestAnimationFrame(animate);
+      if (hideAfter) hideTimer = setTimeout(hide, hideAfter);
+    }
+    function hide() {
+      if (rec.on) return showRec(); // the recording indicator stays up
+      animating = false;
+      pill.classList.remove("show");
+    }
+
+    let offerTimer = null;
+    function answerOffer(accept) {
+      clearTimeout(offerTimer);
+      if (pill.dataset.phase === "offer") hide();
+      T.core.invoke("offer_answer", { accept }).catch(() => {});
+    }
+    document.getElementById("offer-yes").addEventListener("click", () => answerOffer(true));
+    document.getElementById("offer-no").addEventListener("click", () => answerOffer(false));
+
+    function esc(s) { return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+    T.event.listen("whiskr:rec-level", (ev) => {
+      if (pill.dataset.phase === "rec") target = Math.max(target, Math.min(1, Math.sqrt(ev.payload) * 2.4));
+    });
+
+    T.event.listen("whiskr:level", (ev) => {
+      // RMS of speech is small; lift it into a nice 0..1 range.
+      target = Math.max(target, Math.min(1, Math.sqrt(ev.payload) * 2.4));
+    });
+
+    T.event.listen("whiskr:bar", async (ev) => {
+      const { phase, message, sounds } = ev.payload;
+      applyStyle(ev.payload.style);
+      const S = BAR_STRINGS[lang] || BAR_STRINGS.cs;
+      switch (phase) {
+        case "rec_start":
+          await refresh();
+          rec = { on: true, started: performance.now() - (ev.payload.seconds || 0) * 1000 };
+          document.body.classList.add("recording");
+          clearInterval(recTimer);
+          recTimer = setInterval(tickRec, 500);
+          if (sounds) blip(true);
+          showRec();
+          break;
+        case "rec_stop":
+          rec.on = false;
+          document.body.classList.remove("recording");
+          clearInterval(recTimer);
+          if (sounds) blip(false);
+          show("done", (BAR_STRINGS[lang] || BAR_STRINGS.cs).rec_saved, 1800);
+          break;
+        case "notify":
+          if (sounds) blip(false);
+          show("done", esc(message || ""), 4000);
+          break;
+        case "bookmark":
+          if (sounds) blip(true);
+          show("done", `★ ${esc(S.bookmark)} <small>${esc(message || "")}</small>`, 1300);
+          break;
+        case "command":
+          refresh();
+          level = target = 0;
+          if (sounds) blip(true);
+          show("command", S.command);
+          break;
+        case "preview":
+          await refresh();
+          show("preview", (BAR_STRINGS[lang] || BAR_STRINGS.cs).listening, 2600);
+          break;
+        case "hello":
+          await refresh();
+          show("hello", `${esc((BAR_STRINGS[lang] || BAR_STRINGS.cs).hello)} <small>${esc(keyLabels(hotkey).join(" + "))}</small>`, 2600);
+          break;
+        case "listening":
+          refresh();
+          level = target = 0;
+          if (sounds) blip(true);
+          show("listening", message === "task" ? S.task : S.listening);
+          break;
+        case "offer": {
+          await refresh();
+          const S2 = BAR_STRINGS[lang] || BAR_STRINGS.cs;
+          document.getElementById("offer-yes").textContent = S2.offer_yes;
+          document.getElementById("offer-no").textContent = S2.offer_no;
+          if (sounds) blip(true);
+          show("offer", `📞 <b>${esc(message)}</b> — ${esc(S2.offer)}`);
+          clearTimeout(offerTimer);
+          // Nobody answered: drop the offer quietly.
+          offerTimer = setTimeout(() => answerOffer(false), 25000);
+          break;
+        }
+        case "handsfree":
+          show("handsfree", message === "command" ? S.command_hf : S.handsfree);
+          break;
+        case "thinking":
+          show("thinking", S["think_" + message] || S.thinking);
+          break;
+        case "done":
+          if (sounds) blip(false);
+          show("done", S.done, 1100);
+          break;
+        case "cancelled":
+          show("cancelled", S.cancelled, 900);
+          break;
+        case "empty":
+          show("empty", esc(message), 1800);
+          break;
+        case "error":
+          show("error", esc(message), 4500);
+          break;
+        default:
+          hide();
+      }
+    });
+
+    applyStyle("classic");
+    refresh().then(async () => {
+      try { applyStyle((await T.core.invoke("get_settings")).bar_style); } catch {}
+    });
+  </script>
+</body>
+</html>

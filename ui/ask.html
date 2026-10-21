@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8" />
+  <title>Whiskr Ask</title>
+  <link rel="stylesheet" href="css/ask.css" />
+</head>
+<body>
+  <div class="shell" id="shell" data-state="compact">
+    <div class="panel away" id="panel">
+      <div class="look" id="look"><div class="look-img" id="look-img"></div><div class="look-dim" id="look-dim"></div></div>
+      <aside class="side" id="side">
+        <div class="side-in">
+          <button class="side-new" id="new-btn"><span>＋</span><b id="new-label"></b></button>
+          <input class="side-search" id="side-search" spellcheck="false" />
+          <div class="side-list" id="side-list"></div>
+          <div class="side-nav">
+            <button class="side-app" id="side-app"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg><span id="side-app-label"></span></button>
+            <button class="side-app" id="side-set"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span id="side-set-label"></span></button>
+          </div>
+        </div>
+      </aside>
+      <div class="main">
+        <header class="head" data-tauri-drag-region>
+          <button class="icon" id="side-btn" title="Ctrl+H"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button>
+          <div class="modes" id="modes">
+            <button data-mode="ask" class="on" id="m-ask"></button>
+            <button data-mode="debate" id="m-debate"></button>
+            <button data-mode="delegate" id="m-delegate"></button>
+          </div>
+          <span class="spacer" data-tauri-drag-region></span>
+          <span class="runs" id="runs" hidden></span>
+          <button class="chip profile" id="profile" title=""></button>
+          <button class="icon" id="app-btn" title=""><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M3.5 9h17M7 6.8h.01M9.5 6.8h.01"/></svg></button>
+          <button class="icon" id="pin-btn" title=""><svg viewBox="0 0 24 24"><path d="M9 3.5h6l-1 6 3.5 3.5h-11L10 9.5z"/><path d="M12 13v7.5"/></svg></button>
+          <button class="icon" id="close-btn" title="Esc"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+        </header>
+        <div class="thread" id="thread"></div>
+        <div class="composer" id="composer">
+          <div class="ctx" id="ctx"></div>
+          <div class="row">
+            <span class="cat-mini" id="cat-mini"></span>
+            <textarea id="input" rows="1" spellcheck="false" autocomplete="off"></textarea>
+            <button class="engine" id="engine"><i></i><span></span><svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></button>
+            <button class="send" id="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 18.5V5.5M6.5 11l5.5-5.5 5.5 5.5"/></svg></button>
+          </div>
+          <div class="menu" id="engine-menu" hidden></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="js/ask.js"></script>
+</body>
+</html>

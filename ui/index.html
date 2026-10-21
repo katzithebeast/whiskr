@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="cs" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Whiskr</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body class="splashing">
+  <div id="splash">
+    <div class="sp-stage">
+      <div class="sp-cat" id="sp-cat"></div>
+      <div class="sp-word"><div class="sp-name">Whiskr</div><div class="sp-tag" data-i18n="sp_tag"></div></div>
+    </div>
+  </div>
+  <div class="dragbar" data-tauri-drag-region></div>
+  <button class="side-open-btn" id="side-open" title="Ctrl+B"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button>
+  <div class="winctl">
+    <button id="win-min" title="Minimalizovat"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></button>
+    <button id="win-max" title="Maximalizovat"><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" rx="1.2"/></svg></button>
+    <button id="win-close" class="close" title="Zavřít (Whiskr běží dál v liště)"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></button>
+  </div>
+  <div class="app" id="app">
+    <div id="look-bg"><div id="look-bg-img"></div><div id="look-bg-dim"></div></div>
+    <aside class="sidebar">
+      <div class="brand" data-tauri-drag-region><span id="brand-cat"></span><span class="brand-name">Whiskr</span>
+        <button class="side-toggle" id="side-toggle" title="Ctrl+B"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button></div>
+
+      <div class="nav-main">
+      <button class="nav-btn nav-chat" id="nav-chat">
+        <svg viewBox="0 0 24 24"><path d="M5 5.5h14v10H10l-5 4z"/></svg>
+        <span data-i18n="nav_chat"></span><kbd class="nav-k">⇧␣</kbd>
+      </button>
+      <div class="nav-sep"></div>
+      <button class="nav-btn active" data-page="home">
+        <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+        <span data-i18n="nav_home"></span>
+      </button>
+      <button class="nav-btn" data-page="today">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+        <span data-i18n="nav_today"></span><span class="badge" id="nav-today-badge" hidden></span>
+      </button>
+      <button class="nav-btn" data-page="history">
+        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+        <span data-i18n="nav_history"></span>
+      </button>
+      <button class="nav-btn" data-page="recordings">
+        <svg viewBox="0 0 24 24"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg>
+        <span data-i18n="nav_recordings"></span><span class="rec-dot" id="nav-rec-dot" hidden></span>
+      </button>
+      <button class="nav-btn" data-page="dictionary">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
+        <span data-i18n="nav_dictionary"></span>
+      </button>
+      <button class="nav-btn" data-page="settings">
+        <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+        <span data-i18n="nav_settings"></span>
+      </button>
+
+      </div>
+      <div class="chat-side" id="chat-side">
+        <button class="nav-btn" id="chat-back"><svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></svg><span data-i18n="nav_home"></span></button>
+        <button class="cs-new" id="cs-new"><span>＋</span><b id="cs-new-l" data-i18n="cs_new"></b></button>
+        <input class="cs-search" id="cs-search" spellcheck="false" data-i18n-placeholder="cs_search" />
+        <div class="cs-list" id="cs-list"></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <div class="status-card" id="status-card">
+          <div class="status-line"><span class="dot"></span><span id="status-text"></span></div>
+          <div class="status-btns">
+            <button class="btn btn-light btn-sm" id="pause-btn"></button>
+            <button class="btn btn-light btn-sm lock-btn" id="lock-btn" title="Ctrl+Alt+Shift+L"><svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></svg></button>
+          </div>
+        </div>
+        <div class="version" id="version"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- HOME -->
+      <section class="page active" id="page-home">
+        <div id="onboarding" hidden>
+          <h1 data-i18n="ob_title"></h1>
+          <p class="sub" data-i18n="ob_sub"></p>
+          <div class="steps">
+            <div class="card step" id="step-1">
+              <div class="n">1</div>
+              <div>
+                <h2 data-i18n="ob_1"></h2>
+                <p class="sub" data-i18n-html="ob_1_sub"></p>
+                <button class="btn btn-dark" id="open-groq" data-i18n="ob_1_btn"></button>
+              </div>
+            </div>
+            <div class="card step" id="step-2">
+              <div class="n">2</div>
+              <div>
+                <h2 data-i18n="ob_2"></h2>
+                <p class="sub" data-i18n="ob_2_sub"></p>
+                <div class="row">
+                  <input class="input mono grow" id="ob-key" type="password" spellcheck="false" autocomplete="off" />
+                  <button class="btn btn-dark" id="ob-verify" data-i18n="verify"></button>
+                </div>
+                <div class="msg" id="ob-msg"></div>
+              </div>
+            </div>
+            <div class="card step locked" id="step-3">
+              <div class="n">3</div>
+              <div style="min-width:0">
+                <h2 data-i18n="ob_3"></h2>
+                <p class="sub" data-i18n="ob_3_sub"></p>
+                <div class="keys light" id="ob-keys" style="margin-bottom:12px"></div>
+                <textarea class="try" data-i18n-placeholder="try_placeholder"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="home">
+          <div class="upd" id="upd" hidden>
+            <span class="upd-ic">✨</span>
+            <span class="upd-t" id="upd-t"></span>
+            <span class="upd-bar" id="upd-bar" hidden><i id="upd-fill"></i></span>
+            <button class="btn btn-cream btn-sm" id="upd-go"></button>
+          </div>
+          <!-- promo -->
+          <section class="promo">
+            <div class="promo-bg"></div>
+            <div class="promo-logo"><div id="hero-cat"></div></div>
+            <h1 class="promo-name">Whiskr</h1>
+            <p class="promo-tag" data-i18n="promo_tag"></p>
+            <p class="promo-sub" data-i18n="promo_sub"></p>
+            <div class="promo-cta">
+              <div class="keys" id="home-keys"></div>
+              <span class="cta-label" data-i18n="hold_to_talk"></span>
+            </div>
+            <div class="live" id="live"><span class="pulse"></span><span id="live-text"></span></div>
+            <div class="feats">
+              <div class="feat"><svg viewBox="0 0 24 24"><path d="M3 12h2M7 8v8M11 4v16M15 7v10M19 10v4M21.5 12h-.5"/></svg><b data-i18n="feat1"></b><span data-i18n="feat1_s"></span></div>
+              <div class="feat"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg><b data-i18n="feat2"></b><span data-i18n="feat2_s"></span></div>
+              <div class="feat"><svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg><b data-i18n="feat3"></b><span data-i18n="feat3_s"></span></div>
+            </div>
+            <button class="scrollcue" id="news-cue"><svg viewBox="0 0 24 24"><path d="M7 9.5l5 5 5-5"/></svg><span data-i18n="news_cue"></span></button>
+          </section>
+
+          <!-- changelog -->
+          <section class="clog" id="clog">
+            <div class="clog-head">
+              <h2 data-i18n="news_title"></h2>
+              <p data-i18n="news_sub"></p>
+            </div>
+            <div class="clog-line" id="news"></div>
+          </section>
+
+          <!-- kept for the dictation history widgets (shown on Historie) -->
+          <div hidden><div id="quick"></div><button id="home-ask"></button><span id="home-ask-key"></span><b id="stat-words"></b><b id="stat-minutes"></b><b id="stat-saved"></b><div class="tips" id="home-tips2"></div><div id="recent"></div><textarea class="try"></textarea></div>
+        </div>
+      </section>
+
+      <!-- CHAT (the popup chat, embedded) -->
+      <section class="page page-chat" id="page-chat"><iframe id="chat-frame" title="Chat" allow="clipboard-write"></iframe></section>
+
+      <!-- TODAY -->
+      <section class="page" id="page-today">
+        <div class="today-head">
+          <div><h1 data-i18n="today_title"></h1><p class="sub" id="today-date"></p></div>
+          <div class="brief-ask">
+            <input class="input" id="brief-input" data-i18n-placeholder="brief_ph" />
+            <button class="btn btn-dark" id="brief-go" data-i18n="brief_go"></button>
+          </div>
+        </div>
+
+        <div class="card briefing" id="briefing-card">
+          <div class="row" style="justify-content:space-between;align-items:flex-start">
+            <div><h2 data-i18n="briefing_title"></h2><div class="muted small" id="briefing-meta"></div></div>
+            <button class="btn btn-light btn-sm" id="briefing-refresh" data-i18n="briefing_refresh"></button>
+          </div>
+          <div class="md" id="briefing-body"></div>
+        </div>
+
+        <div class="card tasks-card">
+          <div class="row" style="justify-content:space-between">
+            <h2 data-i18n="tasks_title"></h2>
+            <span class="muted small" id="task-hint"></span>
+          </div>
+          <div class="task-add">
+            <input class="input" id="task-input" data-i18n-placeholder="task_ph" />
+            <button class="btn btn-dark" id="task-add" data-i18n="task_add"></button>
+          </div>
+          <div id="task-list"></div>
+        </div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="page" id="page-history">
+        <div class="row" style="justify-content:space-between;margin-bottom:18px">
+          <h1 data-i18n="hist_title"></h1>
+          <button class="btn btn-ghost" id="clear-history" data-i18n="hist_clear"></button>
+        </div>
+        <input class="input" id="hist-search" data-i18n-placeholder="hist_search" />
+        <div id="history-list"></div>
+      </section>
+
+      <!-- RECORDINGS -->
+      <section class="page" id="page-recordings">
+        <div id="rec-list-view">
+          <h1 data-i18n="rec_title"></h1>
+          <p class="sub" data-i18n="rec_sub"></p>
+
+          <div class="card rec-card" id="rec-card">
+            <button class="rec-btn" id="rec-btn" aria-label="Record"><span class="rec-btn-core"></span></button>
+            <div class="rec-main">
+              <div class="rec-state" id="rec-state"></div>
+              <div class="rec-time" id="rec-time">00:00</div>
+              <div class="rec-meter"><i id="rec-meter"></i></div>
+            </div>
+            <button class="btn btn-light btn-sm rec-mark" id="rec-mark" hidden><span>★</span> <span data-i18n="rec_mark"></span> <b id="rec-mark-n"></b></button>
+            <div class="rec-opts">
+              <label class="row small" style="gap:10px;cursor:pointer">
+                <label class="switch"><input type="checkbox" id="rec-system" /><i></i></label>
+                <span><b data-i18n="rec_system"></b><br><span class="muted" data-i18n="rec_system_sub"></span></span>
+              </label>
+            </div>
+          </div>
+          <div class="hint" id="rec-hint" hidden>
+            <span data-i18n-html="rec_hint_voices"></span>
+          </div>
+
+          <div class="rec-tools">
+            <div class="search-box"><span class="ico">⌕</span><input class="input" id="rec-search" data-i18n-placeholder="rec_search" spellcheck="false" /></div>
+            <button class="btn btn-dark btn-sm" id="rec-ask-all-btn"><span>✦</span> <span data-i18n="ask_all"></span></button>
+          </div>
+          <div class="card ask-all" id="rec-ask-all" hidden>
+            <div class="section-head" style="margin:0 0 6px"><h2 data-i18n="ask_all_title"></h2><button class="btn btn-ghost btn-sm" id="rec-ask-all-close">✕</button></div>
+            <div class="chat" data-scope="all"></div>
+          </div>
+          <div class="section-head"><h2 id="rec-list-head" data-i18n="rec_list"></h2></div>
+          <div id="rec-list"></div>
+        </div>
+
+        <div id="rec-detail-view" hidden>
+          <button class="btn btn-ghost" id="rec-back" style="margin-left:-12px" data-i18n="rec_back"></button>
+          <input class="title-input" id="rec-title" spellcheck="false" />
+          <div class="rec-meta" id="rec-meta"></div>
+          <div class="row rec-actions" style="flex-wrap:wrap;margin:14px 0 4px">
+            <button class="btn btn-dark btn-sm" id="rec-copy" data-i18n="rec_copy"></button>
+            <button class="btn btn-light btn-sm" id="rec-word" data-i18n="rec_word"></button>
+            <button class="btn btn-light btn-sm" id="rec-pdf" data-i18n="rec_pdf"></button>
+            <button class="btn btn-light btn-sm" id="rec-folder" data-i18n="rec_folder"></button>
+            <button class="btn btn-light btn-sm" id="rec-redo" data-i18n="rec_redo"></button>
+            <button class="btn btn-ghost btn-sm" id="rec-delete" data-i18n="rec_delete"></button>
+          </div>
+          <div class="player" id="rec-player" hidden>
+            <button class="play" id="pl-play" aria-label="Play"><svg viewBox="0 0 24 24"><path class="i-play" d="M8 5.5v13l11-6.5z"/><path class="i-pause" d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg></button>
+            <button class="skip" id="pl-back" title="−10 s">−10</button>
+            <div class="track" id="pl-track"><div class="fill" id="pl-fill"></div><div class="marks" id="pl-marks"></div></div>
+            <span class="t" id="pl-time">00:00 / 00:00</span>
+            <button class="skip" id="pl-rate" title="Rychlost">1×</button>
+            <audio id="rec-audio" preload="metadata"></audio>
+          </div>
+          <div class="tabs" id="rec-tabs">
+            <button class="tab on" data-tab="summary" data-i18n="tab_summary"></button>
+            <button class="tab" data-tab="transcript" data-i18n="tab_transcript"></button>
+            <button class="tab" data-tab="map" data-i18n="tab_map"></button>
+            <button class="tab" data-tab="ask" data-i18n="tab_ask"></button>
+          </div>
+          <div id="rec-detail"></div>
+          <div class="chat" data-scope="one" id="rec-chat" hidden></div>
+        </div>
+      </section>
+
+      <!-- DICTIONARY -->
+      <section class="page" id="page-dictionary">
+        <h1 data-i18n="dict_title"></h1>
+        <p class="sub" data-i18n="dict_sub"></p>
+        <div class="card" style="margin-top:22px">
+          <div class="row">
+            <input class="input grow" id="dict-input" data-i18n-placeholder="dict_placeholder" />
+            <button class="btn btn-dark" id="dict-add" data-i18n="dict_add"></button>
+          </div>
+          <div class="chips" id="dict-chips"></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="page" id="page-settings">
+        <h1 data-i18n="set_title" style="margin-bottom:16px"></h1>
+        <div class="set-tabs" id="set-tabs">
+          <button data-tab="general" class="on" data-i18n="st_general"></button>
+          <button data-tab="dictation" data-i18n="st_dictation"></button>
+          <button data-tab="keys" data-i18n="st_keys"></button>
+          <button data-tab="recordings" data-i18n="st_recordings"></button>
+          <button data-tab="assistant" data-i18n="st_assistant"></button>
+          <button data-tab="ask" data-i18n="st_ask"></button>
+          <button data-tab="connections" data-i18n="st_connections"></button>
+        </div>
+      <div class="set-tab" data-tab="general">
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_look"></div></div>
+          <div class="setting">
+            <div class="t" data-i18n="set_ui"></div>
+            <select class="input" id="set-ui" style="width:200px">
+              <option value="cs">Čeština</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="setting block">
+            <div><div class="t" data-i18n="set_theme"></div><div class="d" data-i18n="set_theme_sub"></div></div>
+            <div class="segmented" id="set-theme">
+              <button class="seg" data-v="dark"><div class="theme-prev dark"><i></i><i></i></div><b data-i18n="theme_dark"></b></button>
+              <button class="seg" data-v="light"><div class="theme-prev light"><i></i><i></i></div><b data-i18n="theme_light"></b></button>
+              <button class="seg" data-v="system"><div class="theme-prev system"><i></i><i></i></div><b data-i18n="theme_system"></b></button>
+            </div>
+          </div>
+          <div class="setting block">
+            <div><div class="t" data-i18n="set_bar"></div><div class="d" data-i18n="set_bar_sub"></div></div>
+            <div class="segmented" id="set-bar">
+              <button class="seg" data-v="classic">
+                <div class="bar-prev"><div class="bp classic"><i class="c"></i><i class="w"></i><i class="l"></i></div></div>
+                <b data-i18n="bar_classic"></b><span data-i18n="bar_classic_sub"></span>
+              </button>
+              <button class="seg" data-v="slim">
+                <div class="bar-prev"><div class="bp slim"><i class="c"></i><i class="w"></i><i class="l"></i></div></div>
+                <b data-i18n="bar_slim"></b><span data-i18n="bar_slim_sub"></span>
+              </button>
+              <button class="seg" data-v="mini">
+                <div class="bar-prev"><div class="bp mini"><i class="w"></i></div></div>
+                <b data-i18n="bar_mini"></b><span data-i18n="bar_mini_sub"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="card" id="look-card">
+          <div class="card-head"><div class="t" data-i18n="lk_title"></div><div class="d" data-i18n="lk_sub"></div></div>
+          <div class="setting block">
+            <div class="t" data-i18n="lk_presets"></div>
+            <div class="lk-presets" id="lk-presets"></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lk_color"></div><div class="d" data-i18n="lk_color_sub"></div></div>
+            <div class="row"><button class="btn btn-ghost btn-sm" id="lk-color-reset" data-i18n="lk_color_reset"></button><input type="color" id="lk-color" class="lk-color" /></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lk_image"></div><div class="d" data-i18n="lk_image_sub"></div></div>
+            <div class="row"><div class="lk-thumb empty" id="lk-thumb"></div><button class="btn btn-light btn-sm" id="lk-img" data-i18n="lk_upload"></button><button class="btn btn-ghost btn-sm" id="lk-img-del" data-i18n="t_del"></button></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lk_blur"></div><div class="d" id="lk-blur-d"></div></div>
+            <div class="range"><input type="range" id="lk-blur" min="0" max="40" step="1" /><span id="lk-blur-v"></span></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lk_dim"></div><div class="d" data-i18n="lk_dim_sub"></div></div>
+            <div class="range"><input type="range" id="lk-dim" min="0" max="90" step="5" /><span id="lk-dim-v"></span></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lk_op"></div><div class="d" data-i18n="lk_op_sub"></div></div>
+            <div class="range"><input type="range" id="lk-op" min="30" max="100" step="5" /><span id="lk-op-v"></span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="hb_title"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="hb_t"></div><div class="d" data-i18n="hb_d"></div></div>
+            <div class="row"><div class="lk-thumb empty" id="hb-thumb"></div><button class="btn btn-light btn-sm" id="hb-pick" data-i18n="lk_upload"></button><button class="btn btn-ghost btn-sm" id="hb-default" data-i18n="hb_default"></button><button class="btn btn-ghost btn-sm" id="hb-none" data-i18n="hb_none"></button></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_system"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="upd_t"></div><div class="d" id="upd-d"></div></div>
+            <button class="btn btn-light btn-sm" id="upd-check" data-i18n="upd_check"></button>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="splash"></div><div class="d" data-i18n="splash_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="set-splash" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="set_sounds"></div><div class="d" data-i18n="set_sounds_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="set-sounds" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="set_autostart"></div><div class="d" data-i18n="set_autostart_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="set-autostart" /><i></i></label>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="dictation">
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_dictation"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="set_lang"></div><div class="d" data-i18n="set_lang_sub"></div></div>
+            <select class="input" id="set-language" style="width:200px"></select>
+          </div>
+          <div class="setting block">
+            <div class="t" data-i18n="set_polish"></div>
+            <div class="segmented" id="set-polish">
+              <button class="seg" data-v="off"><b data-i18n="polish_off"></b><span data-i18n="polish_off_sub"></span></button>
+              <button class="seg" data-v="light"><b data-i18n="polish_light"></b><span data-i18n="polish_light_sub"></span></button>
+              <button class="seg" data-v="smart"><b data-i18n="polish_smart"></b><span data-i18n="polish_smart_sub"></span></button>
+            </div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="set_tone"></div><div class="d" data-i18n="set_tone_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="set-tone" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div class="t" data-i18n="set_mic"></div>
+            <select class="input" id="set-mic" style="width:280px"></select>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="keys">
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="set_keys"></div></div>
+          <div class="setting hk" data-field="hotkey_ask">
+            <div><div class="t" data-i18n="hk_ask"></div><div class="d" data-i18n="hk_ask_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey_task">
+            <div><div class="t" data-i18n="hk_task"></div><div class="d" data-i18n="hk_task_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey">
+            <div><div class="t" data-i18n="hk_dictate"></div><div class="d" data-i18n="hk_dictate_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey_command">
+            <div><div class="t" data-i18n="hk_command"></div><div class="d" data-i18n="hk_command_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey_record">
+            <div><div class="t" data-i18n="hk_record"></div><div class="d" data-i18n="hk_record_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey_bookmark">
+            <div><div class="t" data-i18n="hk_bookmark"></div><div class="d" data-i18n="hk_bookmark_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="setting hk" data-field="hotkey_paste">
+            <div><div class="t" data-i18n="hk_paste"></div><div class="d" data-i18n="hk_paste_sub"></div></div>
+            <div class="row">
+              <div class="keys light hk-keys"></div>
+              <button class="btn btn-light btn-sm hk-change" data-i18n="set_hotkey_change"></button>
+              <button class="btn btn-ghost btn-sm hk-off" data-i18n="hk_off"></button>
+            </div>
+          </div>
+          <div class="msg err" id="hotkey-msg"></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="lock_t"></div><div class="d" data-i18n="lock_d"></div></div>
+            <button class="btn btn-light btn-sm" id="lock-btn2"></button>
+          </div>
+          <div class="setting setting-col">
+            <div><div class="t" data-i18n="games_t"></div><div class="d" data-i18n="games_d"></div></div>
+            <textarea class="input games" id="games" rows="3" spellcheck="false"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="recordings">
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_meetings"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_detect"></div><div class="d" data-i18n="as_detect_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="as-detect" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_autostop"></div><div class="d" data-i18n="as_autostop_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="as-autostop" /><i></i></label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_templates"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="tpl_default"></div><div class="d" data-i18n="tpl_default_sub"></div></div>
+            <select class="input" id="set-template" style="width:220px"></select>
+          </div>
+          <div class="setting block">
+            <div><div class="t" data-i18n="tpl_custom"></div><div class="d" data-i18n="tpl_custom_sub"></div></div>
+            <div id="tpl-list" class="tpl-list"></div>
+            <button class="btn btn-light btn-sm" id="tpl-add" style="align-self:flex-start" data-i18n="tpl_add"></button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="set_voices"></div></div>
+          <div class="setting block">
+            <div><div class="t" hidden></div><div class="d" data-i18n="set_voices_sub"></div></div>
+            <div class="chips" id="voice-chips" style="margin-top:0"></div>
+            <div class="d" id="voice-model"></div>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="assistant">
+        <div class="card" id="assist-card">
+          <div class="card-head"><div class="t" data-i18n="as_title"></div><div class="d" data-i18n="as_sub"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_brain"></div><div class="d" id="as-brain-status"></div></div>
+            <select class="input" id="as-brain" style="width:270px"></select>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_profile"></div><div class="d" data-i18n="as_profile_sub"></div></div>
+            <div class="row"><select class="input" id="as-profile" style="width:150px"></select><select class="input" id="as-model" style="width:150px"></select></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="sg_briefing"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_briefing"></div><div class="d" data-i18n="as_briefing_sub"></div></div>
+            <div class="row"><input class="input" type="time" id="as-btime" style="width:120px" /><label class="switch"><input type="checkbox" id="as-briefing" /><i></i></label></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="as_bopen"></div></div>
+            <label class="switch"><input type="checkbox" id="as-bopen" /><i></i></label>
+          </div>
+          <div class="setting block">
+            <div class="row" style="justify-content:space-between"><div><div class="t" data-i18n="as_tools"></div><div class="d" data-i18n="as_tools_sub"></div></div>
+              <button class="btn btn-light btn-sm" id="as-tools-load" data-i18n="as_tools_load"></button></div>
+            <label class="radio"><input type="radio" name="as-tools" value="all" /> <span data-i18n="as_tools_all"></span></label>
+            <label class="radio"><input type="radio" name="as-tools" value="some" /> <span data-i18n="as_tools_some"></span></label>
+            <div class="tool-picks" id="as-tools-list"></div>
+          </div>
+          <div class="setting block">
+            <div><div class="t" data-i18n="as_extra"></div><div class="d" data-i18n="as_extra_sub"></div></div>
+            <textarea class="input" id="as-extra" rows="3" data-i18n-placeholder="as_extra_ph"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="ask">
+        <div class="card" id="ask-card">
+          <div class="card-head"><div class="t" data-i18n="sg_ask"></div><div class="d" data-i18n="ask_sub"></div></div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_engine"></div><div class="d" data-i18n="ask_engine_sub"></div></div>
+            <select class="input" id="ask-engine" style="width:220px"></select>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_runtime"></div><div class="d" data-i18n="ask_runtime_sub"></div></div>
+            <select class="input" id="ask-runtime" style="width:220px"></select>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_sel"></div><div class="d" data-i18n="ask_sel_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="ask-sel" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_tw"></div><div class="d" data-i18n="ask_tw_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="ask-tw" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_fast"></div><div class="d" data-i18n="ask_fast_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="ask-fast" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_swap"></div><div class="d" data-i18n="ask_swap_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="ask-swap" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_vsend"></div><div class="d" data-i18n="ask_vsend_sub"></div></div>
+            <label class="switch"><input type="checkbox" id="ask-vsend" /><i></i></label>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_tw_speed"></div><div class="d" data-i18n="ask_tw_speed_sub"></div></div>
+            <div class="range"><input type="range" id="ask-tw-speed" min="20" max="400" step="10" /><span id="ask-tw-speed-v"></span></div>
+          </div>
+          <div class="setting">
+            <div><div class="t" data-i18n="ask_anim"></div><div class="d" data-i18n="ask_anim_sub"></div></div>
+            <div class="range"><input type="range" id="ask-anim" min="150" max="1500" step="50" /><span id="ask-anim-v"></span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t" data-i18n="ask_projects"></div><div class="d" data-i18n="ask_projects_sub"></div></div>
+          <div class="setting block">
+            
+            <div id="ask-projects" class="tpl-list"></div>
+            <button class="btn btn-light btn-sm" id="ask-project-add" style="align-self:flex-start" data-i18n="ask_project_add"></button>
+          </div>
+          <div class="setting block">
+            <div class="t" data-i18n="ask_access"></div>
+            <div class="segmented" id="ask-access" style="grid-template-columns:1fr 1fr">
+              <button class="seg" data-v="safe"><b data-i18n="ask_safe"></b><span data-i18n="ask_safe_sub"></span></button>
+              <button class="seg" data-v="full"><b data-i18n="ask_full"></b><span data-i18n="ask_full_sub"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="set-tab" data-tab="connections">
+        <div class="card">
+          <div class="card-head row" style="justify-content:space-between;align-items:flex-start">
+            <div><div class="t" data-i18n="cn_accounts"></div><div class="d" data-i18n="cn_accounts_sub"></div></div>
+            <button class="btn btn-light btn-sm" id="cn-refresh" data-i18n="cn_refresh"></button>
+          </div>
+          <div id="cn-accounts" class="acc-list"></div>
+          <div class="setting block">
+            <div><div class="t" data-i18n="ask_profiles"></div><div class="d" data-i18n="ask_profiles_sub"></div></div>
+            <div id="ask-profiles" class="tpl-list"></div>
+            <button class="btn btn-light btn-sm" id="ask-profile-add" style="align-self:flex-start" data-i18n="ask_profile_add"></button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="t">Groq</div><div class="d" data-i18n="cn_groq_sub"></div></div>
+          <div class="setting block">
+            <div class="row" style="justify-content:space-between">
+              <div class="d" data-i18n="set_key_sub"></div>
+              <button class="btn btn-ghost" id="get-key" data-i18n="set_key_get"></button>
+            </div>
+            <div class="row">
+              <input class="input mono grow" id="set-key" type="password" spellcheck="false" autocomplete="off" />
+              <button class="btn btn-dark" id="set-verify" data-i18n="verify"></button>
+            </div>
+            <div class="msg" id="key-msg"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head row" style="justify-content:space-between;align-items:flex-start">
+            <div><div class="t" data-i18n="cn_mcp"></div><div class="d" data-i18n="cn_mcp_sub"></div></div>
+            <div class="row"><select class="input input-sm" id="cn-profile" style="width:140px"></select><button class="btn btn-light btn-sm" id="cn-mcp-refresh" data-i18n="cn_refresh"></button></div>
+          </div>
+          <div id="cn-mcp"></div>
+          <button class="btn btn-light btn-sm" id="cn-mcp-add" data-i18n="cn_mcp_add"></button>
+          <div class="mcp-form" id="cn-mcp-form" hidden>
+            <div class="row"><input class="input input-sm" id="mf-name" data-i18n-placeholder="cn_f_name" style="width:180px" />
+              <select class="input input-sm" id="mf-kind" style="width:160px"><option value="stdio">Příkaz (stdio)</option><option value="http">URL (http)</option></select></div>
+            <input class="input input-sm mono" id="mf-cmd" data-i18n-placeholder="cn_f_cmd" />
+            <textarea class="input mono" id="mf-env" rows="2" data-i18n-placeholder="cn_f_env"></textarea>
+            <div class="row"><button class="btn btn-dark btn-sm" id="mf-save" data-i18n="cn_f_save"></button><button class="btn btn-ghost btn-sm" id="mf-cancel" data-i18n="cn_f_cancel"></button></div>
+          </div>
+          <div id="cn-found"></div>
+          <div id="cn-claudeai"></div>
+        </div>
+      </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    // safety net: if the app script fails, never leave the intro covering it
+    setTimeout(() => { if (!window.__whiskrHome) { document.body.classList.remove("splashing"); var s = document.getElementById("splash"); if (s) s.hidden = true; } }, 6000);
+  </script>
+  <script type="module" src="js/app.js"></script>
+  <div id="rec-print"></div>
+</body>
+</html>
